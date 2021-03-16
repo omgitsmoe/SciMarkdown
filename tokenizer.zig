@@ -1,6 +1,7 @@
 const std = @import("std");
 
-const TAB_TO_SPACES = 4;
+const TAB_TO_SPACES = 2;
+const SPACES_PER_INDENT = 2;
 
 pub const TokenKind = enum {
     Invalid,
@@ -8,12 +9,17 @@ pub const TokenKind = enum {
     Hash,
     Asterisk,
     Underscore,
+    Asterisk_double,
+    Underscore_double,
     Tilde,
+    Tilde_double,  // ~~
     Dash,
     Plus,
     Period,
     Colon,
     Bar,
+
+    Image_opener,  // ![
 
     Open_paren,
     Close_paren,
@@ -27,12 +33,16 @@ pub const TokenKind = enum {
     Double_quote,
     Single_quote,
 
-    // slash,
+    Slash,
     Backslash,
 
     Space,
     Tab,
     Newline,
+    Increase_indent,
+    Decrease_indent,
+
+    Comment,  // //
 
     Digits,
 
@@ -41,27 +51,16 @@ pub const TokenKind = enum {
     Text,
 };
 
-// TODO check that these match the enumb above at comptime
-// Like ComptimeStringbut optimized for small sets of disparate string keys
-// pub const TokenStrings = std.ComptimeStringMap(TokenKind, .{
-//     .{ "#", .hash },
-//     .{ "*", .asterisk },
-//     .{ "_", .underscore },
-//     .{ "~", .tilde },
-//     .{ "-", .dash },
-//     .{ "\n", .newline },
-// });
-
 pub const Token = struct {
     token_kind: TokenKind,
-    text: []const u8,
+    start: u32,
+    // exclusive end offset so we can use start..end when slicing
+    end: u32,
+    line_nr: u32,
 
-    pos: TokenPos,
-    const TokenPos = struct {
-        line: u32,
-        // currently in bytes, multi-byte code points not handled
-        col:  u32,
-    };
+    pub inline fn len(self: *const Token) u32 {
+        return self.end - self.start;
+    }
 };
 
 pub const Tokenizer = struct {
@@ -70,14 +69,20 @@ pub const Tokenizer = struct {
     // after looking at zig stdlib that statement might not be true?
     filename: []const u8,
     bytes: []const u8,
-    index: usize,
+    // we don't really need usize just use u32; supporting >4GiB md files would be bananas
+    index: u32,
     // commented out since id have to set this when using peek_next_byte too
+    // NOTE: zig needs 1 extra bit for optional non-pointer values to check if
+    // it has a payload/is non-null
     current_byte: ?u8,
 
-    line_count: usize,
-    last_line_end_idx: usize,
+    line_count: u32,
+    last_line_end_idx: u32,
+    indent_lvl: u8,
+    new_indent_lvl: u8,
 
     pub fn init(allocator: *std.mem.Allocator, filename: []const u8) !Tokenizer {
+        // TODO skip BOM if present
         const file = try std.fs.cwd().openFile(filename, .{ .read = true });
         defer file.close();
 
@@ -89,7 +94,7 @@ pub const Tokenizer = struct {
 
         // need to initialize explicitly or leave it undefined
         // no zero init since it doesn't adhere to the language's principles
-        // due to zero initialization "not being meaningfull"
+        // due to zero initialization "not being meaningful"
         // (but there is std.meta.zeroes)
         var tokenizer = Tokenizer{
             .allocator = allocator,
@@ -99,6 +104,8 @@ pub const Tokenizer = struct {
             .current_byte = contents[0],
             .line_count = 1,
             .last_line_end_idx = 0,
+            .indent_lvl = 0,
+            .new_indent_lvl = 0,
         };
 
         return tokenizer;
@@ -143,17 +150,24 @@ pub const Tokenizer = struct {
     }
 
     pub fn get_token(self: *Tokenizer) Token {
-        var token = Token{
-            .token_kind = .Invalid,
-            .text = undefined,
-            .pos  = .{
-                .line = @intCast(u32, self.line_count), 
-                .col  =
-                    @intCast(
-                        u32,
-                        self.index - self.last_line_end_idx + @boolToInt((self.last_line_end_idx == 0)))
-            },
+        var tok = Token{
+            .token_kind = TokenKind.Invalid,
+            .start = self.index,
+            .end = self.index + 1,
+            .line_nr = self.line_count, 
         };
+
+        // we already advanced to the first non-whitespace byte but we still
+        // need to emit indentation change tokens
+        if (self.indent_lvl < self.new_indent_lvl) {
+            self.indent_lvl += 1;
+            tok.token_kind = TokenKind.Increase_indent;
+            return tok;
+        } else if (self.indent_lvl > self.new_indent_lvl) {
+            self.indent_lvl -= 1;
+            tok.token_kind = TokenKind.Decrease_indent;
+            return tok;
+        }
 
         if (self.current_byte) |char| {
             // ignore \r
@@ -162,99 +176,118 @@ pub const Tokenizer = struct {
                 return self.get_token();
             }
 
-            const token_start: usize = self.index;
-
-            // switch on known tokens else assume text
-            token.token_kind = get_token_kind(char);
-            switch (token.token_kind) {
-                .Newline => {
-                    // since line/col info is only needed on error i could also compute
-                    // these later by saving the index and counting the new lines
+            tok.token_kind = switch (char) {
+                '\n' => blk: {
+                    // since line/col info is only needed on error we only store the
+                    // line number and compute the col on demand
+                    // TODO delete last_line_end_idx
                     self.last_line_end_idx = self.index;
                     self.line_count += 1;
-                    // empty string slice
-                    token.text = ""[0..];
-                },
-                .Text => {
-                    while (self.peek_next_byte()) |next_char| : (self.index += 1) {
-                        if (get_token_kind(next_char) != .Text) {
-                            // self.index points to last char belonging to text token
-                            break;
+
+                    var indent_spaces: i32 = 0;
+                    while (self.peek_next_byte()) |next_byte| : (self.index += 1) {
+                        switch (next_byte) {
+                            ' ' => indent_spaces += 1,
+                            '\t' => indent_spaces += TAB_TO_SPACES,
+                            else => break,
                         }
                     }
-                    token.text = self.bytes[token_start..self.index + 1];
+
+                    // dont emit any token for change in indentation level here since we first
+                    // need the newline token
+                    const new_indent_lvl: u8 = @intCast(u8, @divTrunc(indent_spaces, SPACES_PER_INDENT)); 
+                    if (new_indent_lvl > self.indent_lvl) {
+                        self.new_indent_lvl = new_indent_lvl;
+                    } else if (new_indent_lvl < self.indent_lvl) {
+                        self.new_indent_lvl = new_indent_lvl;
+                    }
+
+                    break :blk TokenKind.Newline;
                 },
-                .Digits => {
+
+                ' ' => .Space,
+
+                '0'...'9' => blk: {
                     while (self.peek_next_byte()) |next_byte| : (self.index += 1) {
                         if (!is_num(next_byte)) {
                             break;
                         }
                     }
-                    token.text = self.bytes[token_start..self.index + 1];
+
+                    break :blk .Digits;
                 },
-                // since we switch on an enum we have to provid an else since the
-                // switch is supposed to be exhaustive
-                else => {
-                    token.text = self.bytes[self.index..self.index + 1];
+
+                '#' => .Hash,
+                '*' => .Asterisk,
+                '_' => .Underscore,
+                '~' => .Tilde,
+                '-' => .Dash,
+                '+' => .Plus,
+
+                '.' => .Period,
+                ':' => .Colon,
+                '|' => .Bar,
+
+                '(' => .Open_paren,
+                ')' => .Close_paren,
+                '[' => .Open_bracket,
+                ']' => .Close_bracket,
+                '<' => .Open_angle_bracket,
+                '>' => .Close_angle_bracket,
+
+                '"' => .Double_quote,
+                '\'' => .Single_quote,
+
+                '/' => blk: {
+                    // type of '/' is apparently comptime_int so we need to cast it to the optional's
+                    // child value so we can compar them
+                    if (self.peek_next_byte() == @intCast(u8, '/')) {
+                        self.prechecked_advance_to_next_byte();
+
+                        // commented out till end of line
+                        while (self.peek_next_byte()) |commented_byte| : (self.index += 1) {
+                            if (is_end_of_line(commented_byte)) {
+                                break;
+                            }
+                        }
+
+                        // need to use the enum name here otherwise type inference breaks somehow
+                        break :blk TokenKind.Comment;
+                    } else {
+                        break :blk TokenKind.Slash;
+                    }
                 },
-            }
-            // OLD
-            // label block as blk so we can 'return' an expression from it
-            // using break :label_name expression;
-            // else => blk: {
-            //     break :blk .text;
-            // },
-            self.advance_to_next_byte();
+                '\\' => blk: {
+                    // \ escapes following byte
+                    // currently only emits one single Text token for a single byte only
+                    self.advance_to_next_byte();
+                    tok.start = self.index;
+                    break :blk .Text;
+                },
+
+                // assuming text (no keywords currently)
+                else => blk: {
+                    // consume everything that's not an inline style
+                    while (self.peek_next_byte()) |next_byte| : (self.index += 1) {
+                        switch (next_byte) {
+                            '\r', '\n', '_', '*', '/', '\\', '`', '<', '[' => break,
+                            else => {},
+                        }
+                    }
+
+                    break :blk .Text;
+                },
+            };
+
+            tok.end = self.index + 1;
         } else {
-            token.token_kind = .Eof;
-            // empty string slice
-            token.text = ""[0..];
+            tok.token_kind = .Eof;
         }
 
-        return token;
+        self.advance_to_next_byte();
+        return tok;
     }
 };
-
-fn get_token_kind(char: u8) TokenKind {
-    return switch (char) {
-        '\n' => .Newline, 
-
-        ' ' => .Space,
-
-        '0'...'9' => .Digits,
-
-        '#' => .Hash,
-        '*' => .Asterisk,
-        '_' => .Underscore,
-        '~' => .Tilde,
-        '-' => .Dash,
-        '+' => .Plus,
-
-        '.' => .Period,
-        ':' => .Colon,
-        '|' => .Bar,
-
-        '(' => .Open_paren,
-        ')' => .Close_paren,
-        '[' => .Open_bracket,
-        ']' => .Close_bracket,
-        '<' => .Open_angle_bracket,
-        '>' => .Close_angle_bracket,
-
-        '"' => .Double_quote,
-        '\'' => .Single_quote,
-
-        // '/' => .Slash,
-        '\\' => .Backslash,
-
-        // TODO extract this switch statement into a function and while we keep
-        // getting .text (or .space) token kinds we keep on adding them to our token's
-        // .text (only exception would be a .space after a newline)
-        //
-        // assuming text (no keywords currently)
-        else => .Text,
-    };
-}
 
 pub inline fn is_alpha(char: u8) bool {
     if ((char >= 'A' and char <= 'Z') or

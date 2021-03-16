@@ -1,3 +1,5 @@
+## Headings
+
 # H1
 ## H2
 ### H3
@@ -13,6 +15,8 @@ Alt-H1
 Alt-H2
 ------
 
+## Text styles
+
 Emphasis, aka italics, with *asterisks* or _underscores_.
 
 Strong emphasis, aka bold, with **asterisks** or __underscores__.
@@ -21,6 +25,14 @@ Combined emphasis with **asterisks and _underscores_**.
 
 Strikethrough uses two tildes. ~~Scratch this.~~
 
+## Comments
+
+// This is a comment
+
+This is a normal paragraph // and this is a comment
+
+
+## Lists
 
 1. First ordered list item
 2. Another item
@@ -38,6 +50,14 @@ Strikethrough uses two tildes. ~~Scratch this.~~
 * Unordered list can use asterisks
 - Or minuses
 + Or pluses
+
+- No indent
+  - First indent
+    - Second indent
+- Dropping two indents
+
+
+## Links and Refs
 
 
 [I'm an inline-style link](https://www.google.com)
@@ -63,6 +83,8 @@ Some text to show that the reference links can follow later.
 [link text itself]: http://www.reddit.com
 
 
+## Images
+
 Here's our logo (hover to see the title text):
 
 Inline-style: 
@@ -73,6 +95,8 @@ Reference-style:
 
 [logo]: https://github.com/adam-p/markdown-here/raw/master/src/common/images/icon48.png "Logo Title Text 2"
 
+
+## Code
 
 Inline `code` has `back-ticks around` it.
 
@@ -93,6 +117,8 @@ But let's throw in a <b>tag</b>.
 ```
 
 
+## Tables
+
 Colons can be used to align columns.
 
 | Tables        | Are           | Cool  |
@@ -111,6 +137,7 @@ Markdown | Less | Pretty
 1 | 2 | 3
 
 
+## Blockquote
 
 > Blockquotes are very handy in email to emulate reply text.
 > This line is part of the same quote.
@@ -122,6 +149,8 @@ Quote break.
 
 **Inline HTML was left out intentionally**
 
+
+## Horizontal rule
 
 Three or more...
 
@@ -137,6 +166,8 @@ ___
 
 Underscores
 
+
+## Line breaks
 
 Here's a line for us to start with.
 
