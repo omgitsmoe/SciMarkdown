@@ -99,38 +99,31 @@ const Parser = struct {
     }
 
     pub fn parse(self: *Parser) !void {
+        // tokenize the whole file first so we can use ptrs that don't get invalidated
+        // due to resizing; maybe also faster for successful compiles since
+        // better cache friendlyness?
+        var token: Token = undefined;
+        token.token_kind = TokenKind.Invalid;
+        while (token.token_kind != TokenKind.Eof) {
+            token = self.tokenizer.get_token();
+            try self.token_buf.append(token);
+        }
+
         while (self.peek_token().token_kind != TokenKind.Eof) {
             try self.parse_block();
-            // const ctok = try self.get_token();
-            // std.debug.print("'{}': {}\n", .{ self.tokenizer.bytes[ctok.start..ctok.end], ctok });
         }
-    }
-
-    /// NOTE: ptr will be invalid after self.token_buf gets resized!
-    inline fn get_token(self: *Parser) !void {
-        try self.token_buf.append(self.tokenizer.get_token());
     }
 
     inline fn eat_token(self: *Parser) !void {
-        // order important
         self.tk_index += 1;
-        try self.get_token();
     }
 
-    /// NOTE: ptr will be invalid after self.token_buf gets resized!
     inline fn peek_token(self: *Parser) *Token {
-        // std.debug.print("{}\n", .{ current_token });
         return &self.token_buf.items[self.tk_index];
     }
 
-    /// NOTE: ptr will be invalid after self.token_buf gets resized!
     fn peek_next_token(self: *Parser) !*Token {
-        const next_token_idx = self.tk_index + 1;
-        if (next_token_idx >= self.token_buf.items.len) {
-            try self.get_token();
-        }
-
-        return &self.token_buf.items[next_token_idx];
+        return &self.token_buf.items[self.tk_index + 1];
     }
 
     // TODO remove err_msg?
@@ -141,14 +134,6 @@ const Parser = struct {
         } else {
             return true;
         }
-    }
-
-    fn advance_to_first_nonspace(self: *Parser) u32 {
-        var num_spaces: u32 = 0;
-        return blk: while ((try self.get_token()).token_kind == TokenKind.Space) {
-            num_spaces += 1;
-            break :blk num_spaces;
-        };
     }
 
     fn parse_block(self: *Parser) !void {
@@ -174,14 +159,6 @@ const Parser = struct {
                     try self.eat_token();
                 }
 
-                // TODO !IMPORTANT! can't store references to tokens since they get invalidated
-                // as soon as we get a new one, so either:
-                // 1) tokenize the whole file into a dynamic buffer and then iterate over that
-                //    using indices
-                // 2) make sure our syntax only requires one token look-ahead so we don't
-                //    even have to store them in a buffer
-                // 3) store token handles/indices and use that to look them up in our dynamic buffer
-                //    (never storing pointers)
                 const tok_after_hashes = self.peek_token();
                 if (heading_lvl > 6 or
                     (tok_after_hashes.token_kind != TokenKind.Space and
@@ -191,22 +168,21 @@ const Parser = struct {
                     // TODO close_open_block
                     try self.eat_token();  // eat space
 
-                    var new_node: *Node = try Node.create(&self.node_arena.allocator);
-                    if (!self.require_token(TokenKind.Text, "Expected heading name!\n")) {
-                        return ParseError.SyntaxError;
-                    }
-                    // TODO could be multiple text or other kinds of tokens that should be
+                    // could be multiple text or other kinds of tokens that should be
                     // interpreted as text
-                    const text_tok = self.peek_token();
+                    // TODO => this should be replaced by parse inline
+                    const heading_name_start = self.peek_token().start;
+                    while (self.peek_token().token_kind != TokenKind.Newline) {
+                        try self.eat_token();
+                    }
+                    const heading_name_end = self.peek_token().start;
+
+                    var new_node: *Node = try Node.create(&self.node_arena.allocator);
                     new_node.data = .{
                         .Heading = .{ .level = heading_lvl, .setext_heading = false,
-                                      .text = self.tokenizer.bytes[text_tok.start..text_tok.end] },
+                                      .text = self.tokenizer.bytes[heading_name_start..heading_name_end] },
                     };
-                    try self.eat_token(); // eat text token
 
-                    if (!self.require_token(TokenKind.Newline, "Expected end of line!\n")) {
-                        return ParseError.SyntaxError;
-                    }
                     std.debug.print(
                         "Heading: level {} text: '{}'\n",
                         .{ new_node.data.Heading.level, new_node.data.Heading.text });
@@ -307,12 +283,12 @@ const Parser = struct {
             // },
 
             else => {
-                std.debug.print("Else branch ln {}\n", .{ self.peek_token().line_nr });
+                // std.debug.print("Else branch ln {}\n", .{ self.peek_token().line_nr });
                 try self.eat_token();
 
                 var token_kind = self.peek_token().token_kind;
                 while (token_kind != TokenKind.Newline and token_kind != TokenKind.Eof) {
-                    std.debug.print("Ate token {} ln {}\n", .{ token_kind, self.peek_token().line_nr });
+                    // std.debug.print("Ate token {} ln {}\n", .{ token_kind, self.peek_token().line_nr });
                     try self.eat_token();
                     token_kind = self.peek_token().token_kind;
                 }
