@@ -114,15 +114,23 @@ const Parser = struct {
         }
     }
 
-    inline fn eat_token(self: *Parser) !void {
+    /// does no bounds checking beyond which is integrated with zig up to ReleaseSafe mode
+    /// assumes caller doesn't call peek_next_token after receiving TokenKind.Eof
+    inline fn eat_token(self: *Parser) void {
         self.tk_index += 1;
+    }
+
+    inline fn put_back(self: *Parser) void {
+        self.tk_index -= 1;
     }
 
     inline fn peek_token(self: *Parser) *Token {
         return &self.token_buf.items[self.tk_index];
     }
 
-    fn peek_next_token(self: *Parser) !*Token {
+    /// does no bounds checking beyond which is integrated with zig up to ReleaseSafe mode
+    /// assumes caller doesn't call peek_next_token after receiving TokenKind.Eof
+    fn peek_next_token(self: *Parser) *Token {
         return &self.token_buf.items[self.tk_index + 1];
     }
 
@@ -135,6 +143,10 @@ const Parser = struct {
             return true;
         }
     }
+    
+    inline fn report_error(comptime err_msg: []const u8, args: anytype) void {
+        std.log.err(err_msg, args);
+    }
 
     fn parse_block(self: *Parser) !void {
         switch (self.peek_token().token_kind) {
@@ -144,7 +156,7 @@ const Parser = struct {
             TokenKind.Newline => {
                 // close block
                 std.debug.print("Close block ln {}\n", .{ self.peek_token().line_nr });
-                try self.eat_token();
+                self.eat_token();
             },
 
             TokenKind.Hash => {
@@ -153,27 +165,30 @@ const Parser = struct {
                 // not doing: optional closing # that don't have to match the number of opening #
 
                 var heading_lvl: i16 = 1;
-                try self.eat_token();
+                self.eat_token();
                 while (self.peek_token().token_kind == TokenKind.Hash) {
                     heading_lvl += 1;
-                    try self.eat_token();
+                    self.eat_token();
                 }
 
                 const tok_after_hashes = self.peek_token();
-                if (heading_lvl > 6 or
-                    (tok_after_hashes.token_kind != TokenKind.Space and
-                     tok_after_hashes.token_kind != TokenKind.Newline)) {
-                    // self.parse_paragraph() or error?
+                if (heading_lvl > 6 or tok_after_hashes.token_kind != TokenKind.Space) {
+                    // can't use self. otherwise self *Parser gets passed
+                    Parser.report_error(
+                        "ln:{}: Headings can only go up to level 6 and have to be followed by a" ++
+                        " space and heading text! If you didn't want to create a heading" ++
+                        " escacpe the first '#' with a '\\'", .{ tok_after_hashes.line_nr });
+                    return ParseError.SyntaxError;
                 } else {
                     // TODO close_open_block
-                    try self.eat_token();  // eat space
+                    self.eat_token();  // eat space
 
                     // could be multiple text or other kinds of tokens that should be
                     // interpreted as text
                     // TODO => this should be replaced by parse inline
                     const heading_name_start = self.peek_token().start;
                     while (self.peek_token().token_kind != TokenKind.Newline) {
-                        try self.eat_token();
+                        self.eat_token();
                     }
                     const heading_name_end = self.peek_token().start;
 
@@ -194,7 +209,7 @@ const Parser = struct {
                 // maybe thematic break: the same 3 or more *, - or _ followed by optional spaces
                 // bullet list/list item
                 const start_token_kind = self.peek_token().token_kind;
-                try self.eat_token();
+                self.eat_token();
 
                 const next_token = self.peek_token();
                 if (start_token_kind != TokenKind.Underscore and
@@ -204,12 +219,12 @@ const Parser = struct {
                 } else if (start_token_kind != TokenKind.Plus and
                            next_token.token_kind == start_token_kind) {
 
-                    if ((try self.peek_next_token()).token_kind == start_token_kind) {
-                        try self.eat_token();
+                    if (self.peek_next_token().token_kind == start_token_kind) {
+                        self.eat_token();
 
                         // thematic break
                         while (self.peek_token().token_kind == start_token_kind) {
-                            try self.eat_token();
+                            self.eat_token();
                         }
 
                         // CommonMark allows optional spaces after a thematic break - we don't!
@@ -245,11 +260,11 @@ const Parser = struct {
                 // maybe ordered list
                 // 1-9 digits (0-9) ending in a '.' or ')'
                 // TODO can't be in a paragraph
-                try self.eat_token();
+                self.eat_token();
                 const next_token_kind = self.peek_token().token_kind;
                 if (next_token_kind == TokenKind.Period or
                         next_token_kind == TokenKind.Close_paren) {
-                    try self.eat_token();
+                    self.eat_token();
 
                     if (!self.require_token(TokenKind.Space, "Expected ' ' after list item starter!\n"))
                     {
@@ -277,25 +292,106 @@ const Parser = struct {
                 }
             },
 
+            TokenKind.Backtick_triple => {
+                std.debug.print("Found 3backtick ln{}\n", .{ self.peek_token().line_nr });
+                self.eat_token();
+                    
+                // language name or newline
+                const lang_name_start = self.peek_token().start;
+                while (self.peek_token().token_kind != TokenKind.Newline) {
+                    self.eat_token();
+                }
+                const lang_name_end = self.peek_token().start;
+                self.eat_token();
+
+                var code_node = try Node.create(&self.node_arena.allocator);
+                code_node.data = .{
+                    .FencedCode = .{
+                        .language_name =
+                            if (lang_name_start != lang_name_end)
+                                self.tokenizer.bytes[lang_name_start..lang_name_end]
+                            else "",
+                        .code = undefined,
+                    },
+                };
+                self.current_document.append_child(code_node);
+                std.debug.print("Found code block ln{}: lang_name {}\n",
+                    .{ self.peek_token().line_nr, code_node.data.FencedCode.language_name });
+
+                try self.parse_code_block();
+            },
+
             // TokenKind.Close_angle_bracket => {
             //     // maybe block quote
             //     // 0-3 spaces + '>' with an optional following ' '
+            //     // can contain other blocks: headings, code blocks etc.
             // },
 
             else => {
                 // std.debug.print("Else branch ln {}\n", .{ self.peek_token().line_nr });
-                try self.eat_token();
+                self.eat_token();
 
                 var token_kind = self.peek_token().token_kind;
                 while (token_kind != TokenKind.Newline and token_kind != TokenKind.Eof) {
                     // std.debug.print("Ate token {} ln {}\n", .{ token_kind, self.peek_token().line_nr });
-                    try self.eat_token();
+                    self.eat_token();
                     token_kind = self.peek_token().token_kind;
                 }
                 // will end on newline token -> need to advance one more
-                try self.eat_token();
+                self.eat_token();
             },
         }
+    }
+
+    fn parse_code_block(self: *Parser) !void {
+        const starting_lvl = self.tokenizer.indent_lvl;
+        var string_buf = std.ArrayList(u8).init(self.allocator);
+        var current_indent_lvl: u8 = 0;
+        const indent = " " ** tok.SPACES_PER_INDENT;
+        var current_token: *Token = self.peek_token();
+        var line_start = false;
+
+        while (true) {
+            if (current_token.token_kind == TokenKind.Backtick_triple) {
+                self.eat_token();
+                break;
+            } else if (current_token.token_kind == TokenKind.Newline) {
+                try string_buf.append('\n');
+                line_start = true;
+            } else if (current_token.token_kind == TokenKind.Increase_indent) {
+                current_indent_lvl += 1;
+            } else if (current_token.token_kind == TokenKind.Decrease_indent) {
+                current_indent_lvl -= 1;
+                if (current_indent_lvl < 0) {
+                    self.report_error(
+                        "ln:{}: Code block's indent decreased beyond it's starting level!",
+                        .{ current_token.line_nr });
+
+                    return ParserError.SyntaxError;
+                }
+            } else {
+                if (line_start) {
+                    // indent to correct level at line start
+                    var i: u32 = 0;
+                    while (i < current_indent_lvl) : (i += 1) {
+                        try string_buf.appendSlice(indent);
+                    }
+                    line_start = false;
+                }
+
+                switch (current_token.token_kind) {
+                    TokenKind.Text, TokenKind.Comment => 
+                        try string_buf.appendSlice(
+                            self.tokenizer.bytes[current_token.start..current_token.end]),
+                    else => try string_buf.appendSlice(current_token.token_kind.str()),
+                }
+            }
+
+            self.eat_token();
+            current_token = self.peek_token();
+        }
+
+        std.debug.print("Code block:\n{s}", .{ string_buf.items });
     }
 };
 
@@ -311,7 +407,6 @@ const NodeKind = enum {
 
     Heading,
 
-    IndentedCode,
     FencedCode,
 
     HtmlBlock,
@@ -364,8 +459,8 @@ const Node = struct {
 
         Heading: struct { level: i16, setext_heading: bool, text: []const u8 },
 
-        IndentedCode,
-        FencedCode,
+        // TODO free code buffer
+        FencedCode: struct { language_name: []const u8, code: []const u8 },
 
         HtmlBlock,
 

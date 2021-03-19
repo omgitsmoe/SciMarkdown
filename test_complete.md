@@ -7,6 +7,10 @@
 ##### H5
 ###### H6
 
+#### Headline / with # other + kinds tokens
+#### __Fat head__ *cursive* [link](https://google.com)
+// ####Syntax error heading
+
 Alternatively, for H1 and H2, an underline-ish style:
 
 Alt-H1
@@ -107,8 +111,14 @@ alert(s);
 ```
  
 ```python
+// same comment token as we have
 s = "Python syntax highlighting"
-print s
+// test that indents get printed
+if s == "":
+    if len(s.split()) > 3:
+        print s
+else:
+    print s
 ```
  
 ```
@@ -131,10 +141,12 @@ There must be at least 3 dashes separating each header cell.
 The outer pipes (|) are optional, and you don't need to make the 
 raw Markdown line up prettily. You can also use inline Markdown.
 
-Markdown | Less | Pretty
---- | --- | ---
-*Still* | `renders` | **nicely**
-1 | 2 | 3
+// require table rows to start with | so there's no ambiguity between table rows and thematic breaks
+// also require closing table cells with |?
+| Markdown | Less | Pretty
+| --- | --- | ---
+| *Still* | `renders` | **nicely**
+| 1 | 2 | 3
 
 
 ## Blockquote

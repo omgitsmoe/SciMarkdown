@@ -1,7 +1,7 @@
 const std = @import("std");
 
-const TAB_TO_SPACES = 2;
-const SPACES_PER_INDENT = 2;
+pub const TAB_TO_SPACES = 2;
+pub const SPACES_PER_INDENT = 2;
 
 pub const TokenKind = enum {
     Invalid,
@@ -19,7 +19,7 @@ pub const TokenKind = enum {
     Colon,
     Bar,
 
-    Image_opener,  // ![
+    Exclamation_open_bracket,  // ![
 
     Open_paren,
     Close_paren,
@@ -32,6 +32,8 @@ pub const TokenKind = enum {
 
     Double_quote,
     Single_quote,
+    Backtick,
+    Backtick_triple,
 
     Slash,
     Backslash,
@@ -49,6 +51,47 @@ pub const TokenKind = enum {
     Eof,
 
     Text,
+
+    pub inline fn str(self: TokenKind) []const u8 {
+        return switch (self) {
+            .Hash => "#",
+            .Asterisk => "*",
+            .Underscore => "_",
+            .Asterisk_double => "**",
+            .Underscore_double => "__",
+            .Tilde => "~",
+            .Tilde_double => "~~",  // ~~
+            .Dash => "-",
+            .Plus => "+",
+            .Period => ".",
+            .Colon => ":",
+            .Bar => "|",
+
+            .Exclamation_open_bracket => "![",  // ![
+
+            .Open_paren => "(",
+            .Close_paren => ")",
+            .Open_bracket => "[",
+            .Close_bracket => "]",
+            // open_brace,
+            // close_brace,
+            .Open_angle_bracket => "<",
+            .Close_angle_bracket => ">",
+
+            .Double_quote => "\"",
+            .Single_quote => "'",
+            .Backtick => "`",
+            .Backtick_triple => "```",
+
+            .Slash => "/",
+            .Backslash => "\\",
+
+            .Space => " ",
+            .Newline => "\n",
+            // TODO error here?
+            else => "",
+        };
+    }
 };
 
 pub const Token = struct {
@@ -237,6 +280,22 @@ pub const Tokenizer = struct {
 
                 '"' => .Double_quote,
                 '\'' => .Single_quote,
+                '`' => blk: {
+                    if (self.peek_next_byte() == @intCast(u8, '`')) {
+                        self.prechecked_advance_to_next_byte();
+                        self.advance_to_next_byte();
+                        if (self.current_byte == @intCast(u8, '`')) {
+                            break :blk TokenKind.Backtick_triple;
+                        } else {
+                            // TODO backtrack here or what other solutions are there?
+                            // currently just emitting a short .Text token for just the
+                            // two backticks atm
+                            break :blk TokenKind.Text;
+                        }
+                    } else {
+                        break :blk TokenKind.Backtick;
+                    }
+                },
 
                 '/' => blk: {
                     // type of '/' is apparently comptime_int so we need to cast it to the optional's
