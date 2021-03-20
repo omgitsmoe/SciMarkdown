@@ -17,6 +17,7 @@ pub const TokenKind = enum {
     Plus,
     Period,
     Colon,
+    Colon_open_bracket,
     Bar,
 
     Exclamation_open_bracket,  // ![
@@ -25,6 +26,7 @@ pub const TokenKind = enum {
     Close_paren,
     Open_bracket,
     Close_bracket,
+    Close_bracket_colon, // ]:
     // open_brace,
     // close_brace,
     Open_angle_bracket,
@@ -48,12 +50,14 @@ pub const TokenKind = enum {
 
     Digits,
 
-    Eof,
-
     Text,
 
-    pub inline fn str(self: TokenKind) []const u8 {
+    Eof,
+
+    pub inline fn name(self: TokenKind) []const u8 {
         return switch (self) {
+            .Invalid => "(invalid)",
+
             .Hash => "#",
             .Asterisk => "*",
             .Underscore => "_",
@@ -65,6 +69,7 @@ pub const TokenKind = enum {
             .Plus => "+",
             .Period => ".",
             .Colon => ":",
+            .Colon_open_bracket => ":[",
             .Bar => "|",
 
             .Exclamation_open_bracket => "![",  // ![
@@ -73,6 +78,7 @@ pub const TokenKind = enum {
             .Close_paren => ")",
             .Open_bracket => "[",
             .Close_bracket => "]",
+            .Close_bracket_colon => "]:",
             // open_brace,
             // close_brace,
             .Open_angle_bracket => "<",
@@ -87,9 +93,15 @@ pub const TokenKind = enum {
             .Backslash => "\\",
 
             .Space => " ",
-            .Newline => "\n",
-            // TODO error here?
-            else => "",
+            .Tab => "\\t",
+            .Newline => "\\n",
+
+            .Increase_indent => "(increase_indent)",
+            .Decrease_indent => "(decrease_indent)",
+            .Comment => "(comment)",
+            .Digits => "(digits)",
+            .Text => "(text)",
+            .Eof => "(EOF)",
         };
     }
 };
@@ -103,6 +115,23 @@ pub const Token = struct {
 
     pub inline fn len(self: *const Token) u32 {
         return self.end - self.start;
+    }
+
+    /// get string content from token
+    /// bytes: md file text content
+    pub inline fn text(self: *Token, bytes: []const u8) []const u8 {
+        // make sure we don't call this on sth. that is not 'printable'
+        std.debug.assert(switch (self.token_kind) {
+            .Decrease_indent, .Eof => false,
+            else => true });
+
+        return switch (self.token_kind) {
+            .Tab => " " ** TAB_TO_SPACES,
+            .Increase_indent => " " ** SPACES_PER_INDENT,
+            .Newline => "\n",
+            .Text, .Digits, .Comment => bytes[self.start..self.end],
+            else => return self.token_kind.name(),
+        };
     }
 };
 
@@ -268,13 +297,27 @@ pub const Tokenizer = struct {
                 '+' => .Plus,
 
                 '.' => .Period,
-                ':' => .Colon,
+                ':' => blk: {
+                    if (self.peek_next_byte() == @intCast(u8, '[')) {
+                        self.prechecked_advance_to_next_byte();
+                        break :blk TokenKind.Colon_open_bracket;
+                    } else {
+                        break :blk TokenKind.Colon;
+                    }
+                },
                 '|' => .Bar,
 
                 '(' => .Open_paren,
                 ')' => .Close_paren,
                 '[' => .Open_bracket,
-                ']' => .Close_bracket,
+                ']' => blk: {
+                    if (self.peek_next_byte() == @intCast(u8, ':')) {
+                        self.prechecked_advance_to_next_byte();
+                        break :blk TokenKind.Close_bracket_colon;
+                    } else {
+                        break :blk TokenKind.Close_bracket;
+                    }
+                },
                 '<' => .Open_angle_bracket,
                 '>' => .Close_angle_bracket,
 
@@ -300,6 +343,7 @@ pub const Tokenizer = struct {
                 '/' => blk: {
                     // type of '/' is apparently comptime_int so we need to cast it to the optional's
                     // child value so we can compar them
+                    // TODO change comment token so we don't force everyone to escape // in urls
                     if (self.peek_next_byte() == @intCast(u8, '/')) {
                         self.prechecked_advance_to_next_byte();
 
@@ -329,7 +373,7 @@ pub const Tokenizer = struct {
                     // consume everything that's not an inline style
                     while (self.peek_next_byte()) |next_byte| : (self.index += 1) {
                         switch (next_byte) {
-                            '\r', '\n', '_', '*', '/', '\\', '`', '<', '[' => break,
+                            '\r', '\n', '_', '*', '/', '\\', '`', '<', '[', ']', ')', '"' => break,
                             else => {},
                         }
                     }

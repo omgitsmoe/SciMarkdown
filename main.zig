@@ -54,7 +54,6 @@ const Parser = struct {
 
     current_document: *Node,
     last_node: *Node,
-    indent: i32,
     open_blocks: [50]*Node,
     open_block_idx: u8,
 
@@ -74,8 +73,7 @@ const Parser = struct {
             .tk_index = 0,
 
             .current_document = undefined,
-            .last_node = undefined, 
-            .indent = 0,
+            .last_node = undefined,
             .open_blocks = undefined,
             .open_block_idx = 0,
         };
@@ -88,6 +86,7 @@ const Parser = struct {
         current_document.data = .Document;
         parser.current_document = current_document;
         parser.last_node = current_document;
+        parser.open_blocks[0] = current_document;
 
         return parser;
     }
@@ -96,6 +95,27 @@ const Parser = struct {
         self.node_arena.deinit();
         self.tokenizer.deinit();
         self.token_buf.deinit();
+    }
+
+    inline fn new_node(self: *Parser) !*Node {
+        const node = try Node.create(&self.node_arena.allocator);
+        self.last_node = node;
+        return node;
+    }
+
+    inline fn open_block(self: *Parser, block: *Node) void {
+        self.open_block_idx += 1;
+        self.open_blocks[self.open_block_idx] = block;
+    }
+
+    /// does not check if
+    inline fn last_block(self: *Parser) *Node {
+        return self.open_blocks[self.open_block_idx];
+    }
+
+    inline fn close_last_block(self: *Parser) void {
+        std.debug.assert(self.open_block_idx > 0);
+        self.open_block_idx -= 1;
     }
 
     pub fn parse(self: *Parser) !void {
@@ -130,17 +150,17 @@ const Parser = struct {
 
     /// does no bounds checking beyond which is integrated with zig up to ReleaseSafe mode
     /// assumes caller doesn't call peek_next_token after receiving TokenKind.Eof
-    fn peek_next_token(self: *Parser) *Token {
+    inline fn peek_next_token(self: *Parser) *Token {
         return &self.token_buf.items[self.tk_index + 1];
     }
 
-    // TODO remove err_msg?
-    inline fn require_token(self: *Parser, token_kind: TokenKind, err_msg: []const u8) bool {
-        if (self.peek_token().token_kind != token_kind) {
-            std.debug.print("ERROR - {}", .{ err_msg });
-            return false;
-        } else {
-            return true;
+    inline fn require_token(self: *Parser, comptime token_kind: TokenKind,
+                            comptime expl_msg: []const u8) ParseError!void {
+        const token = self.peek_token();
+        if (token.token_kind != token_kind) {
+            Parser.report_error("ln:{}: Expected token '{}' found '{}'" ++ expl_msg ++ "\n",
+                                .{ token.line_nr, token_kind.name(), token.token_kind.name() });
+            return ParseError.SyntaxError;
         }
     }
     
@@ -150,12 +170,10 @@ const Parser = struct {
 
     fn parse_block(self: *Parser) !void {
         switch (self.peek_token().token_kind) {
-            // TokenKind.Increase_indent => {
-            //     // code block if not in another block?
-            // },
             TokenKind.Newline => {
-                // close block
-                std.debug.print("Close block ln {}\n", .{ self.peek_token().line_nr });
+                // close block on blank line otherwise ignore
+                // std.debug.print("Close block ln {}\n", .{ self.peek_token().line_nr });
+                // TODO close_last_block
                 self.eat_token();
             },
 
@@ -186,22 +204,29 @@ const Parser = struct {
                     // could be multiple text or other kinds of tokens that should be
                     // interpreted as text
                     // TODO => this should be replaced by parse inline
+                    // TODO open block
                     const heading_name_start = self.peek_token().start;
-                    while (self.peek_token().token_kind != TokenKind.Newline) {
+                    // TODO make sure we account for sudden Eof everywhere
+                    while (self.peek_token().token_kind != TokenKind.Newline and
+                            self. peek_token().token_kind != TokenKind.Eof) {
                         self.eat_token();
                     }
                     const heading_name_end = self.peek_token().start;
+                    if (heading_name_start == heading_name_end) {
+                        Parser.report_error("ln:{}: Empty heading name!", .{ self.peek_token().line_nr });
+                        return ParseError.SyntaxError;
+                    }
 
-                    var new_node: *Node = try Node.create(&self.node_arena.allocator);
-                    new_node.data = .{
-                        .Heading = .{ .level = heading_lvl, .setext_heading = false,
+                    var heading_node: *Node = try self.new_node();
+                    heading_node.data = .{
+                        .Heading = .{ .level = heading_lvl,
                                       .text = self.tokenizer.bytes[heading_name_start..heading_name_end] },
                     };
 
                     std.debug.print(
                         "Heading: level {} text: '{}'\n",
-                        .{ new_node.data.Heading.level, new_node.data.Heading.text });
-                    self.last_node.append_child(new_node);
+                        .{ heading_node.data.Heading.level, heading_node.data.Heading.text });
+                    self.current_document.append_child(heading_node);
                 }
             },
 
@@ -214,8 +239,7 @@ const Parser = struct {
                 const next_token = self.peek_token();
                 if (start_token_kind != TokenKind.Underscore and
                     next_token.token_kind == TokenKind.Space) {
-                    // TODO can only be started while not in a block
-                    // unordered list
+                    // TODO unordered list (can be started while in a container block)
                 } else if (start_token_kind != TokenKind.Plus and
                            next_token.token_kind == start_token_kind) {
 
@@ -243,7 +267,7 @@ const Parser = struct {
                                         .{ self.peek_token().line_nr });
                             return ParseError.SyntaxError;
                         } else {
-                            var thematic_break = try Node.create(&self.node_arena.allocator);
+                            var thematic_break = try self.new_node();
                             thematic_break.data = .ThematicBreak;
                             self.current_document.append_child(thematic_break);
                             std.debug.print("Found valid thematic break! starting with: '{}'\n",
@@ -266,14 +290,14 @@ const Parser = struct {
                         next_token_kind == TokenKind.Close_paren) {
                     self.eat_token();
 
-                    if (!self.require_token(TokenKind.Space, "Expected ' ' after list item starter!\n"))
-                    {
-                        return ParseError.SyntaxError;
-                    }
+                    try self.require_token(TokenKind.Space, " after list item starter!");
+                    self.eat_token();
 
-                    var list_node = try Node.create(&self.node_arena.allocator);
+                    var list_node = try self.new_node();
                     list_node.data = .OrderedList;
-                    self.current_document.append_child(list_node);
+                    // TODO can only be opened inside another container block
+                    self.last_block().append_child(list_node);
+                    self.open_block(list_node);
 
                     // TODO parse_list_item; move this into it v
                     // limit doesn't make sense, since number isn't used for numbering the
@@ -284,7 +308,7 @@ const Parser = struct {
                     //     return ParseError.ExceededOrderedListDigits;
                     // }
                     // const item_text = try self.require_token(TokenKind.Text
-                    // var list_item = try Node.create(&self.node_arena.allocator);
+                    // var list_item = try self.new_node();
                     // list_item.data = .OrderedListItem;
                     // list_node.append_child(list_item);
                 } else {
@@ -293,7 +317,6 @@ const Parser = struct {
             },
 
             TokenKind.Backtick_triple => {
-                std.debug.print("Found 3backtick ln{}\n", .{ self.peek_token().line_nr });
                 self.eat_token();
                     
                 // language name or newline
@@ -304,7 +327,7 @@ const Parser = struct {
                 const lang_name_end = self.peek_token().start;
                 self.eat_token();
 
-                var code_node = try Node.create(&self.node_arena.allocator);
+                var code_node = try self.new_node();
                 code_node.data = .{
                     .FencedCode = .{
                         .language_name =
@@ -314,11 +337,65 @@ const Parser = struct {
                         .code = undefined,
                     },
                 };
-                self.current_document.append_child(code_node);
+                self.last_block().append_child(code_node);
+                self.open_block(code_node);
+
                 std.debug.print("Found code block ln{}: lang_name {}\n",
                     .{ self.peek_token().line_nr, code_node.data.FencedCode.language_name });
 
                 try self.parse_code_block();
+            },
+
+            TokenKind.Colon_open_bracket => {
+                // link reference definition
+                self.eat_token();
+
+                var token = self.peek_token();
+                const ref_name_start = token.start;
+                // CommonMark allows one \n inside a reference label
+                // don't allow any for now!
+                while (token.token_kind != TokenKind.Close_bracket_colon and
+                        token.token_kind != TokenKind.Newline and
+                        token.token_kind != TokenKind.Eof) {
+                    self.eat_token();
+                    token = self.peek_token();
+                }
+                const ref_name_end = self.peek_token().start;
+
+                if (token.token_kind != TokenKind.Close_bracket_colon) {
+                    Parser.report_error("ln:{}: Missing closing ']:' from reference label!\n",
+                                        .{ self.peek_token().line_nr });
+                    return ParseError.SyntaxError;
+                }
+                self.eat_token();
+
+                if (ref_name_start == ref_name_end) {
+                    Parser.report_error("ln:{}: Empty reference label!\n", .{ self.peek_token().line_nr });
+                    return ParseError.SyntaxError;
+                }
+                std.debug.print(
+                    "ln:{}: Ref with label: '{}'\n",
+                    .{ self.peek_token().line_nr, self.tokenizer.bytes[ref_name_start..ref_name_end] });
+
+                try self.require_token(
+                    TokenKind.Space,
+                    ". A space is required between reference label and reference content!");
+                self.eat_token();
+
+                var reference_def = try self.new_node();
+                reference_def.data = .{
+                    .LinkRef = .{
+                        .label = self.tokenizer.bytes[ref_name_start..ref_name_end],
+                        .url = undefined,
+                        .title = null,
+                    },
+                };
+
+                // TODO make sure we're not in another container block etc.
+                // reference definitions are alywas direct children of the document
+                self.current_document.append_child(reference_def);
+
+                try self.parse_link_destination();
             },
 
             // TokenKind.Close_angle_bracket => {
@@ -383,7 +460,7 @@ const Parser = struct {
                     TokenKind.Text, TokenKind.Comment => 
                         try string_buf.appendSlice(
                             self.tokenizer.bytes[current_token.start..current_token.end]),
-                    else => try string_buf.appendSlice(current_token.token_kind.str()),
+                    else => try string_buf.appendSlice(current_token.token_kind.name()),
                 }
             }
 
@@ -391,7 +468,101 @@ const Parser = struct {
             current_token = self.peek_token();
         }
 
+        self.close_last_block();  // close code block
         std.debug.print("Code block:\n{s}", .{ string_buf.items });
+    }
+
+    /// when this method is called we're still on the first '('
+    fn parse_link_destination(self: *Parser) !void {
+        self.require_token(TokenKind.Open_paren, ". Link destinations need to be wrapped in parentheses!");
+        self.eat_token();  // eat (
+
+        var token = self.peek_token();
+        const token_url_start = token;
+        var ended_on_link_title = false;
+        while (token.token_kind != TokenKind.Close_paren) {
+            if (token.token_kind == TokenKind.Eof) {
+                Parser.report_error("ln:{}: Missing closing ')' in link destination\n",
+                                    .{ token_url_start.line_nr });
+                return ParseError.SyntaxError;
+            } else if (token.token_kind == TokenKind.Space and
+                       self.peek_next_token().token_kind == TokenKind.Double_quote) {
+                // start of link title
+                self.eat_token();
+                ended_on_link_title = true;
+                break;
+            }
+
+            std.debug.print("Ate {}\n", .{ token.token_kind });
+            self.eat_token();
+            token = self.peek_token();
+        }
+
+        const token_url_end = token;
+        if (token_url_start.start == token_url_end.start) {
+            Parser.report_error("ln:{}: Empty link destination\n",
+                                .{ token_url_end.line_nr });
+            return ParseError.SyntaxError;
+        }
+
+        const link_or_ref = self.last_node;
+        if (ended_on_link_title) {
+            self.eat_token();  // eat "
+            token = self.peek_token();
+            const link_title_start = token;
+
+            while (token.token_kind != TokenKind.Double_quote) {
+                if (token.token_kind == TokenKind.Eof) {
+                    Parser.report_error("ln:{}: Missing closing '\"' in link title\n",
+                                        .{ link_title_start.line_nr });
+                    return ParseError.SyntaxError;
+                }
+
+                self.eat_token();
+                token = self.peek_token();
+            }
+            const link_title_end = token;
+            self.eat_token();  // eat "
+
+            try self.require_token(TokenKind.Close_paren,
+                                   ". Link destination needs to be enclosed in parentheses!");
+            
+            if (link_title_start.start == link_title_end.start) {
+                Parser.report_error("ln:{}: Empty link title\n",
+                                    .{ token_url_end.line_nr });
+                return ParseError.SyntaxError;
+            }
+
+            switch (link_or_ref.data) {
+                // payload of this switch prong is the assigned NodeData type
+                // |value| is just a copy so we need to capture the ptr to modify it
+                .LinkRef => |*value| {
+                    value.*.url = self.tokenizer.bytes[token_url_start.start..token_url_end.start];
+                    value.*.title = self.tokenizer.bytes[link_title_start.start..link_title_end.start];
+                },
+                .Link => |*value| {
+                    value.*.url = self.tokenizer.bytes[token_url_start.start..token_url_end.start];
+                    value.*.title = self.tokenizer.bytes[link_title_start.start..link_title_end.start];
+                },
+                else => unreachable,
+            }
+        } else {
+            self.eat_token();  // eat )
+
+            switch (link_or_ref.data) {
+                .LinkRef => |*value| {
+                    value.*.url = self.tokenizer.bytes[token_url_start.start..token_url_end.start];
+                    value.*.title = null;
+                },
+                .Link => |*value| {
+                    value.*.url = self.tokenizer.bytes[token_url_start.start..token_url_end.start];
+                    value.*.title = null;
+                },
+                else => unreachable,
+            }
+        }
+
+        std.debug.print("Link dest: {}\n", .{ link_or_ref.data });
     }
 };
 
@@ -457,14 +628,16 @@ const Node = struct {
         // leaf blocks
         ThematicBreak,
 
-        Heading: struct { level: i16, setext_heading: bool, text: []const u8 },
+        Heading: struct { level: i16, text: []const u8 },
 
         // TODO free code buffer
         FencedCode: struct { language_name: []const u8, code: []const u8 },
 
         HtmlBlock,
 
-        LinkRef,
+        LinkRef: struct { label: []const u8, url: []const u8, title: ?[]const u8 },
+
+        Image,  // inline in CommonMark - leaf block here
 
         Paragraph,
         BlankLine, // ?
@@ -484,8 +657,7 @@ const Node = struct {
 
         // inline
         Text,
-        Link,
-        Image,  // inline apparently
+        Link: struct { url: []const u8, title: ?[]const u8 },
     };
 
     pub inline fn create(allocator: *std.mem.Allocator) !*Node {
@@ -513,5 +685,23 @@ const Node = struct {
         }
 
         child.parent = self;
+    }
+
+    pub inline fn is_container_block(self: *Node) bool {
+        return switch (self.data) {
+            .BlockQuote, .BulletList, .BulletListItem, .OrderedList, .OrderedListItem => true,
+            else => false,
+        };
+    }
+
+    pub inline fn is_leaf_block(self: *Node) bool {
+        return switch (self.data) {
+            .ThematicBreak, .Heading, .FencedCode, .LinkRef, .Paragraph, .BlankLine, .Image => true,
+            else => false,
+        };
+    }
+
+    pub inline fn is_block(self: *Node) bool {
+        return is_container_block(self) or is_leaf_block(self);
     }
 };

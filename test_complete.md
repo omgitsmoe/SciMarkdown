@@ -10,6 +10,8 @@
 #### Headline / with # other + kinds tokens
 #### __Fat head__ *cursive* [link](https://google.com)
 // ####Syntax error heading
+// empty headig -> syntax error
+//# 
 
 Alternatively, for H1 and H2, an underline-ish style:
 
@@ -82,9 +84,13 @@ example.com (but not on Github, for example).
 
 Some text to show that the reference links can follow later.
 
-[arbitrary case-insensitive reference text]: https://www.mozilla.org
-[1]: http://slashdot.org
-[link text itself]: http://www.reddit.com
+// reference definitions have to start with :[ as opposed to just [ to avoid ambiguity with
+// inline links, otherwise we'd have to try parsing it and then backtrack
+// (since the first bracket for links needs to be parsed as inline (with emph, code span etc.)
+//  instead of just as pure text)
+:[arbitrary case-insensitive reference text]: (https://www.mozilla.org)
+:[1]: (http://slashdot.org)
+:[link text itself]: (http://www.reddit.com)
 
 
 ## Images
