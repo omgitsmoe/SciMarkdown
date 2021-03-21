@@ -9,9 +9,9 @@
 
 #### Headline / with # other + kinds tokens
 #### __Fat head__ *cursive* [link](https://google.com)
-// ####Syntax error heading
-// empty headig -> syntax error
-//# 
+%% ####Syntax error heading
+%% empty headig -> syntax error
+%%# 
 
 Alternatively, for H1 and H2, an underline-ish style:
 
@@ -33,9 +33,9 @@ Strikethrough uses two tildes. ~~Scratch this.~~
 
 ## Comments
 
-// This is a comment
+%% This is a comment
 
-This is a normal paragraph // and this is a comment
+This is a normal paragraph %% and this is a comment
 
 
 ## Lists
@@ -84,13 +84,13 @@ example.com (but not on Github, for example).
 
 Some text to show that the reference links can follow later.
 
-// reference definitions have to start with :[ as opposed to just [ to avoid ambiguity with
-// inline links, otherwise we'd have to try parsing it and then backtrack
-// (since the first bracket for links needs to be parsed as inline (with emph, code span etc.)
-//  instead of just as pure text)
+%% reference definitions have to start with :[ as opposed to just [ to avoid ambiguity with
+%% inline links, otherwise we'd have to try parsing it and then backtrack
+%% (since the first bracket for links needs to be parsed as inline (with emph, code span etc.)
+%%  instead of just as pure text)
 :[arbitrary case-insensitive reference text]: (https://www.mozilla.org)
 :[1]: (http://slashdot.org)
-:[link text itself]: (http://www.reddit.com)
+:[link text itself]: (http://www.reddit.com "Link title")
 
 
 ## Images
@@ -103,7 +103,7 @@ Inline-style:
 Reference-style: 
 ![alt text][logo]
 
-[logo]: https://github.com/adam-p/markdown-here/raw/master/src/common/images/icon48.png "Logo Title Text 2"
+:[logo]: (https://github.com/adam-p/markdown-here/raw/master/src/common/images/icon48.png "Logo Title Text 2")
 
 
 ## Code
@@ -117,9 +117,9 @@ alert(s);
 ```
  
 ```python
-// same comment token as we have
+%% same comment token as we have
 s = "Python syntax highlighting"
-// test that indents get printed
+%% test that indents get printed
 if s == "":
     if len(s.split()) > 3:
         print s
@@ -147,8 +147,8 @@ There must be at least 3 dashes separating each header cell.
 The outer pipes (|) are optional, and you don't need to make the 
 raw Markdown line up prettily. You can also use inline Markdown.
 
-// require table rows to start with | so there's no ambiguity between table rows and thematic breaks
-// also require closing table cells with |?
+%% require table rows to start with | so there's no ambiguity between table rows and thematic breaks
+%% also require closing table cells with |?
 | Markdown | Less | Pretty
 | --- | --- | ---
 | *Still* | `renders` | **nicely**

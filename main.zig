@@ -16,8 +16,9 @@ pub fn main() !void {
     }
 
     const allocator = &gpa.allocator;
+    // Caller must call argsFree on result
     const args = try std.process.argsAlloc(allocator);
-    defer allocator.free(args);
+    defer std.process.argsFree(allocator, args);
 
     return mainArgs(allocator, args);
 }
@@ -32,19 +33,15 @@ pub fn mainArgs(allocator: *std.mem.Allocator, args: []const []const u8) !void {
 
     const root_file_name = args[1];
 
-    // rather than parse char by char
-    // split tokenizing/parsing up into parsing the lines/paragraphs
-    // and inline tokens etc.
-    // since a lot of tokens only have an 'effect' if they start the line as the first
-    // non-whitepsace token
-
     var parser: Parser = try Parser.init(allocator, root_file_name);
+    defer parser.deinit();
     try parser.parse();
 }
 
 const Parser = struct {
     allocator: *std.mem.Allocator,
     node_arena: std.heap.ArenaAllocator,
+    string_arena: std.heap.ArenaAllocator,
 
     tokenizer: Tokenizer,
     // NOTE: ArrayList: pointers to items are __invalid__ after resizing operations!!
@@ -66,6 +63,7 @@ const Parser = struct {
         var parser = Parser{
             .allocator = allocator,
             .node_arena = std.heap.ArenaAllocator.init(allocator),
+            .string_arena = std.heap.ArenaAllocator.init(allocator),
 
             .tokenizer = try Tokenizer.init(allocator, filename),
             // TODO allocate a capacity for tokens with ensureCapacity based on filesize
@@ -92,6 +90,8 @@ const Parser = struct {
     }
 
     pub fn deinit(self: *Parser) void {
+        // free code string buffers from .FencedCode nodes
+        self.string_arena.deinit();
         self.node_arena.deinit();
         self.tokenizer.deinit();
         self.token_buf.deinit();
@@ -172,6 +172,8 @@ const Parser = struct {
         switch (self.peek_token().token_kind) {
             TokenKind.Newline => {
                 // close block on blank line otherwise ignore
+                // blank lines are ignored
+                // two \n (blank line) end a paragraph
                 // std.debug.print("Close block ln {}\n", .{ self.peek_token().line_nr });
                 // TODO close_last_block
                 self.eat_token();
@@ -422,7 +424,9 @@ const Parser = struct {
 
     fn parse_code_block(self: *Parser) !void {
         const starting_lvl = self.tokenizer.indent_lvl;
-        var string_buf = std.ArrayList(u8).init(self.allocator);
+        // ArrayList doesn't accept ArenaAllocator directly so we need to
+        // pass string_arena.allocator which is the proper mem.Allocator
+        var string_buf = std.ArrayList(u8).init(&self.string_arena.allocator);
         var current_indent_lvl: u8 = 0;
         const indent = " " ** tok.SPACES_PER_INDENT;
         var current_token: *Token = self.peek_token();
@@ -468,13 +472,17 @@ const Parser = struct {
             current_token = self.peek_token();
         }
 
+        const code_block = self.last_block();
+        // string_buf.toOwnedSlice() -> caller owns the returned memory (remaining capacity is free'd)
+        code_block.data.FencedCode.code = string_buf.toOwnedSlice();
+
         self.close_last_block();  // close code block
-        std.debug.print("Code block:\n{s}", .{ string_buf.items });
+        std.debug.print("Code block:\n{s}", .{ code_block.data.FencedCode.code });
     }
 
     /// when this method is called we're still on the first '('
     fn parse_link_destination(self: *Parser) !void {
-        self.require_token(TokenKind.Open_paren, ". Link destinations need to be wrapped in parentheses!");
+        try self.require_token(TokenKind.Open_paren, ". Link destinations need to be wrapped in parentheses!");
         self.eat_token();  // eat (
 
         var token = self.peek_token();
@@ -487,13 +495,13 @@ const Parser = struct {
                 return ParseError.SyntaxError;
             } else if (token.token_kind == TokenKind.Space and
                        self.peek_next_token().token_kind == TokenKind.Double_quote) {
+                // TODO allow title to start at next line
                 // start of link title
                 self.eat_token();
                 ended_on_link_title = true;
                 break;
             }
 
-            std.debug.print("Ate {}\n", .{ token.token_kind });
             self.eat_token();
             token = self.peek_token();
         }
@@ -536,11 +544,7 @@ const Parser = struct {
             switch (link_or_ref.data) {
                 // payload of this switch prong is the assigned NodeData type
                 // |value| is just a copy so we need to capture the ptr to modify it
-                .LinkRef => |*value| {
-                    value.*.url = self.tokenizer.bytes[token_url_start.start..token_url_end.start];
-                    value.*.title = self.tokenizer.bytes[link_title_start.start..link_title_end.start];
-                },
-                .Link => |*value| {
+                .Link, .LinkRef => |*value| {
                     value.*.url = self.tokenizer.bytes[token_url_start.start..token_url_end.start];
                     value.*.title = self.tokenizer.bytes[link_title_start.start..link_title_end.start];
                 },
@@ -550,11 +554,7 @@ const Parser = struct {
             self.eat_token();  // eat )
 
             switch (link_or_ref.data) {
-                .LinkRef => |*value| {
-                    value.*.url = self.tokenizer.bytes[token_url_start.start..token_url_end.start];
-                    value.*.title = null;
-                },
-                .Link => |*value| {
+                .Link, .LinkRef => |*value| {
                     value.*.url = self.tokenizer.bytes[token_url_start.start..token_url_end.start];
                     value.*.title = null;
                 },
@@ -617,6 +617,7 @@ const Node = struct {
     // separate kind field
     data: NodeData,
 
+    const LinkData = struct { label: []const u8, url: []const u8, title: ?[]const u8 };
     // tagged union
     const NodeData = union(NodeKind) {
         // special
@@ -635,7 +636,7 @@ const Node = struct {
 
         HtmlBlock,
 
-        LinkRef: struct { label: []const u8, url: []const u8, title: ?[]const u8 },
+        LinkRef: LinkData,
 
         Image,  // inline in CommonMark - leaf block here
 
@@ -657,7 +658,7 @@ const Node = struct {
 
         // inline
         Text,
-        Link: struct { url: []const u8, title: ?[]const u8 },
+        Link: LinkData,
     };
 
     pub inline fn create(allocator: *std.mem.Allocator) !*Node {
@@ -705,3 +706,67 @@ const Node = struct {
         return is_container_block(self) or is_leaf_block(self);
     }
 };
+
+// zig gets polymorphism/generics by using compile time functions that return a type
+pub fn DepthFirstIterator(comptime T: type) type {
+    return struct {
+        const Self = @This();  // polymorphic type
+        const Queue = std.TailQueue(*T);
+        const QNode = Queue.Node;
+
+        allocator: *std.mem.Allocator,
+        node_buf: std.ArrayList(QNode),
+        q: Queue,
+
+        pub fn init(allocator: *std.mem.Allocator, start: *T) !Self {
+            var dfs = Self{
+                .allocator = allocator,
+                .node_buf = std.ArrayList(QNode).init(allocator),
+                .q = Queue{},
+            };
+
+            const added = try dfs.node_buf.addOne();
+            added.* = QNode{ .data = start };
+            dfs.q.append(added);
+
+            return dfs;
+        }
+
+        pub fn deinit(self: *Self) void {
+            self.node_buf.deinit();
+        }
+
+        pub fn next(self: *Self) ?*T {
+            if (self.q.len > 0) {
+                const current_item = self.q.popFirst();
+
+                // queue the children
+                if (current_item.data.first_child) |first_child| {
+                    var current_child = first_child;
+                    self.queue_left(QNode{ .data = first_child });
+
+                    while (current_child.next) |child| {
+                        self.queue_left(QNode{ .data = child });
+                        current_child = child;
+                    }
+                }
+
+                return current_item.data;
+            } else {
+                return null;
+            }
+        }
+
+        fn queue(self: *Self, node: QNode) !void {
+            const new = try self.q.addOne();
+            new.* = node;
+            self.q.append(new);
+        }
+
+        fn queue_left(self: *Self, node: QNode) !void {
+            const new = try self.q.addOne();
+            new.* = node;
+            self.q.prepend(new);
+        }
+    };
+}

@@ -37,7 +37,6 @@ pub const TokenKind = enum {
     Backtick,
     Backtick_triple,
 
-    Slash,
     Backslash,
 
     Space,
@@ -89,7 +88,6 @@ pub const TokenKind = enum {
             .Backtick => "`",
             .Backtick_triple => "```",
 
-            .Slash => "/",
             .Backslash => "\\",
 
             .Space => " ",
@@ -159,6 +157,7 @@ pub const Tokenizer = struct {
         defer file.close();
 
         // there's also file.readAll that requires a pre-allocated buffer
+        // TODO dynamically sized buffer
         const contents = try file.reader().readAllAlloc(
             allocator,
             2 * 1024 * 1024,  // max_size 2MiB, returns error.StreamTooLong if file is larger
@@ -340,11 +339,10 @@ pub const Tokenizer = struct {
                     }
                 },
 
-                '/' => blk: {
-                    // type of '/' is apparently comptime_int so we need to cast it to the optional's
-                    // child value so we can compar them
-                    // TODO change comment token so we don't force everyone to escape // in urls
-                    if (self.peek_next_byte() == @intCast(u8, '/')) {
+                '%' => blk: {
+                    // type of '%' is apparently comptime_int so we need to cast it to u8 to
+                    // be able to compare it
+                    if (self.peek_next_byte() == @intCast(u8, '%')) {
                         self.prechecked_advance_to_next_byte();
 
                         // commented out till end of line
@@ -357,9 +355,11 @@ pub const Tokenizer = struct {
                         // need to use the enum name here otherwise type inference breaks somehow
                         break :blk TokenKind.Comment;
                     } else {
-                        break :blk TokenKind.Slash;
+                        break :blk TokenKind.Text;
                     }
+
                 },
+
                 '\\' => blk: {
                     // \ escapes following byte
                     // currently only emits one single Text token for a single byte only
@@ -373,7 +373,8 @@ pub const Tokenizer = struct {
                     // consume everything that's not an inline style
                     while (self.peek_next_byte()) |next_byte| : (self.index += 1) {
                         switch (next_byte) {
-                            '\r', '\n', '_', '*', '/', '\\', '`', '<', '[', ']', ')', '"' => break,
+                            ' ', '\t', '\r', '\n', '_', '*', '/', '\\', '`',
+                            '<', '[', ']', ')', '"' => break,
                             else => {},
                         }
                     }
