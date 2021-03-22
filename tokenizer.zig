@@ -158,6 +158,7 @@ pub const Tokenizer = struct {
 
         // there's also file.readAll that requires a pre-allocated buffer
         // TODO dynamically sized buffer
+        // TODO just pass buffer and filename, loading of the file should be done elsewhere
         const contents = try file.reader().readAllAlloc(
             allocator,
             2 * 1024 * 1024,  // max_size 2MiB, returns error.StreamTooLong if file is larger
@@ -186,7 +187,7 @@ pub const Tokenizer = struct {
         self.allocator.free(self.bytes);
     }
 
-    fn advance_to_next_byte(self: *Tokenizer) void {
+    inline fn advance_to_next_byte(self: *Tokenizer) void {
         if (self.index + 1 < self.bytes.len) {
             self.index += 1;
             self.current_byte = self.bytes[self.index];
@@ -197,12 +198,12 @@ pub const Tokenizer = struct {
     }
 
     /// caller has to make sure advancing the index doesn't go beyond bytes' length
-    fn prechecked_advance_to_next_byte(self: *Tokenizer) void {
+    inline fn prechecked_advance_to_next_byte(self: *Tokenizer) void {
         self.index += 1;
         self.current_byte = self.bytes[self.index];
     }
 
-    fn peek_next_byte(self: *Tokenizer) ?u8 {
+    inline fn peek_next_byte(self: *Tokenizer) ?u8 {
         if (self.index + 1 < self.bytes.len) {
             return self.bytes[self.index + 1];
         } else {
@@ -256,13 +257,15 @@ pub const Tokenizer = struct {
                     self.line_count += 1;
 
                     var indent_spaces: i32 = 0;
-                    while (self.peek_next_byte()) |next_byte| : (self.index += 1) {
+                    while (self.peek_next_byte()) |next_byte| : (self.prechecked_advance_to_next_byte()) {
                         switch (next_byte) {
                             ' ' => indent_spaces += 1,
                             '\t' => indent_spaces += TAB_TO_SPACES,
                             else => break,
                         }
                     }
+
+                    std.debug.print("Line: {} Next non-space char: {}\n", .{ self.line_count, self.current_byte });
 
                     // dont emit any token for change in indentation level here since we first
                     // need the newline token
@@ -279,7 +282,7 @@ pub const Tokenizer = struct {
                 ' ' => .Space,
 
                 '0'...'9' => blk: {
-                    while (self.peek_next_byte()) |next_byte| : (self.index += 1) {
+                    while (self.peek_next_byte()) |next_byte| : (self.prechecked_advance_to_next_byte()) {
                         if (!is_num(next_byte)) {
                             break;
                         }
@@ -289,8 +292,22 @@ pub const Tokenizer = struct {
                 },
 
                 '#' => .Hash,
-                '*' => .Asterisk,
-                '_' => .Underscore,
+                '*' => blk: {
+                    if (self.peek_next_byte() == @intCast(u8, '*')) {
+                        self.prechecked_advance_to_next_byte();
+                        break :blk TokenKind.Asterisk_double;
+                    } else {
+                        break :blk TokenKind.Asterisk;
+                    }
+                },
+                '_' => blk: {
+                    if (self.peek_next_byte() == @intCast(u8, '_')) {
+                        self.prechecked_advance_to_next_byte();
+                        break :blk TokenKind.Underscore_double;
+                    } else {
+                        break :blk TokenKind.Underscore;
+                    }
+                },
                 '~' => .Tilde,
                 '-' => .Dash,
                 '+' => .Plus,
@@ -371,7 +388,7 @@ pub const Tokenizer = struct {
                 // assuming text (no keywords currently)
                 else => blk: {
                     // consume everything that's not an inline style
-                    while (self.peek_next_byte()) |next_byte| : (self.index += 1) {
+                    while (self.peek_next_byte()) |next_byte| : (self.prechecked_advance_to_next_byte()) {
                         switch (next_byte) {
                             ' ', '\t', '\r', '\n', '_', '*', '/', '\\', '`',
                             '<', '[', ']', ')', '"' => break,
