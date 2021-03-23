@@ -44,6 +44,7 @@ pub const TokenKind = enum {
     Newline,
     Increase_indent,
     Decrease_indent,
+    Hard_line_break,  // \ in front of a line break
 
     Comment,  // //
 
@@ -96,6 +97,7 @@ pub const TokenKind = enum {
 
             .Increase_indent => "(increase_indent)",
             .Decrease_indent => "(decrease_indent)",
+            .Hard_line_break => "(hard_line_break)",
             .Comment => "(comment)",
             .Digits => "(digits)",
             .Text => "(text)",
@@ -242,10 +244,17 @@ pub const Tokenizer = struct {
         }
 
         if (self.current_byte) |char| {
-            // ignore \r
             if (char == '\r') {
-                self.advance_to_next_byte();
-                return self.get_token();
+                if (self.peek_next_byte() != @as(u8, '\n')) {
+                    // MacOS classic uses just \r as line break
+                    // -> replace \r with \n
+                    self.current_byte = @as(u8, '\n');
+                    return self.get_token();
+                } else {
+                    // ignore \r on DOS (\r\n line break)
+                    self.advance_to_next_byte();
+                    return self.get_token();
+                }
             }
 
             tok.token_kind = switch (char) {
@@ -264,8 +273,6 @@ pub const Tokenizer = struct {
                             else => break,
                         }
                     }
-
-                    std.debug.print("Line: {} Next non-space char: {}\n", .{ self.line_count, self.current_byte });
 
                     // dont emit any token for change in indentation level here since we first
                     // need the newline token
@@ -380,9 +387,24 @@ pub const Tokenizer = struct {
                 '\\' => blk: {
                     // \ escapes following byte
                     // currently only emits one single Text token for a single byte only
+
+                    // below triggers zig compiler bug: https://github.com/ziglang/zig/issues/6059
+                    // if (self.current_byte == @intCast(u8, '\r') or
+                    //         self.current_byte == @intCast(u8, '\n')) {
+                    // make sure we don't consume the line break so we still hit the
+                    // correct switch prong next call
+
+                    // backslash followed by \n (or \r but that is handled before the switch)
+                    // is a hard line break
+                    // NOTE: make sure we don't actually consume the \n
+                    if (self.peek_next_byte() == @as(u8, '\n')) {
+                        break :blk TokenKind.Hard_line_break;
+                    }
+
                     self.advance_to_next_byte();
                     tok.start = self.index;
-                    break :blk .Text;
+                    break :blk TokenKind.Text;
+
                 },
 
                 // assuming text (no keywords currently)
