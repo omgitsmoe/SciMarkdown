@@ -51,6 +51,7 @@ const Parser = struct {
 
     current_document: *Node,
     last_node: *Node,
+    // first open_block is always current_document
     open_blocks: [50]*Node,
     open_block_idx: u8,
 
@@ -97,8 +98,9 @@ const Parser = struct {
         self.token_buf.deinit();
     }
 
-    inline fn new_node(self: *Parser) !*Node {
+    inline fn new_node(self: *Parser, parent: *Node) !*Node {
         const node = try Node.create(&self.node_arena.allocator);
+        parent.append_child(node);
         self.last_node = node;
         return node;
     }
@@ -108,8 +110,8 @@ const Parser = struct {
         self.open_blocks[self.open_block_idx] = block;
     }
 
-    /// does not check if
-    inline fn last_block(self: *Parser) *Node {
+    /// does no bounds checking
+    inline fn get_last_block(self: *Parser) *Node {
         return self.open_blocks[self.open_block_idx];
     }
 
@@ -170,12 +172,21 @@ const Parser = struct {
 
     fn parse_block(self: *Parser) !void {
         switch (self.peek_token().token_kind) {
+            TokenKind.Comment => {
+                self.eat_token();
+                self.eat_token();  // eat \n
+            },
             TokenKind.Newline => {
                 // close block on blank line otherwise ignore
                 // blank lines are ignored
                 // two \n (blank line) end a paragraph
-                // std.debug.print("Close block ln {}\n", .{ self.peek_token().line_nr });
-                // TODO close_last_block
+
+                // self.current_document is always open_blocks[0]
+                if (self.open_block_idx > 0) {
+                    std.debug.print("Close block ln {}\n", .{ self.peek_token().line_nr });
+                    self.close_last_block();
+                }
+
                 self.eat_token();
             },
 
@@ -219,7 +230,7 @@ const Parser = struct {
                         return ParseError.SyntaxError;
                     }
 
-                    var heading_node: *Node = try self.new_node();
+                    var heading_node: *Node = try self.new_node(self.current_document);
                     heading_node.data = .{
                         .Heading = .{ .level = heading_lvl,
                                       .text = self.tokenizer.bytes[heading_name_start..heading_name_end] },
@@ -228,57 +239,67 @@ const Parser = struct {
                     std.debug.print(
                         "Heading: level {} text: '{}'\n",
                         .{ heading_node.data.Heading.level, heading_node.data.Heading.text });
-                    self.current_document.append_child(heading_node);
                 }
             },
 
-            TokenKind.Asterisk, TokenKind.Dash, TokenKind.Plus, TokenKind.Underscore => {
+            TokenKind.Dash, TokenKind.Plus => {
                 // maybe thematic break: the same 3 or more *, - or _ followed by optional spaces
                 // bullet list/list item
+                // remove _ and * from being able to start a thematic break/unordered list
+                // so we don't have to backtrack if parsing doesn't succeed when it was just
+                // being used as emphasis
                 const start_token_kind = self.peek_token().token_kind;
                 self.eat_token();
 
                 const next_token = self.peek_token();
-                if (start_token_kind != TokenKind.Underscore and
-                    next_token.token_kind == TokenKind.Space) {
+                if (next_token.token_kind == TokenKind.Space) {
                     // TODO unordered list (can be started while in a container block)
                 } else if (start_token_kind != TokenKind.Plus and
-                           next_token.token_kind == start_token_kind) {
+                           next_token.token_kind == TokenKind.Dash and
+                           self.peek_next_token().token_kind == TokenKind.Dash) {
+                    self.eat_token();
 
-                    if (self.peek_next_token().token_kind == start_token_kind) {
+                    // thematic break
+                    var token_kind = self.peek_token().token_kind;
+                    while (token_kind == TokenKind.Dash or
+                            token_kind == TokenKind.Comment or
+                            token_kind == TokenKind.Space) {
                         self.eat_token();
-
-                        // thematic break
-                        while (self.peek_token().token_kind == start_token_kind) {
-                            self.eat_token();
-                        }
-
-                        // CommonMark allows optional spaces after a thematic break - we don't!
-                        // so the line the thematic break is in has to end in a newline right
-                        // after the thematic break (-, *, _)
-                        if (self.peek_token().token_kind != TokenKind.Newline) {
-                            // \\ starts a zig multiline string-literal that goes until the end
-                            // of the line, \n is only added if the next line starts with a \\
-                            // alternatively you could use ++ at the end of the line to concat
-                            // the arrays
-                            // TODO recognizes --- of table sep as invalid thematic break
-                            std.log.err("Line {}: " ++
-                                        "A line with a thematic break (consisting of at least 3 " ++
-                                        "*, _, or -) can only contain the character that started " ++
-                                        "the break and has to end in a new line!\n" ,
-                                        .{ self.peek_token().line_nr });
-                            return ParseError.SyntaxError;
-                        } else {
-                            var thematic_break = try self.new_node();
-                            thematic_break.data = .ThematicBreak;
-                            self.current_document.append_child(thematic_break);
-                            std.debug.print("Found valid thematic break! starting with: '{}'\n",
-                                            .{start_token_kind});
-                        }
-                    } else {
-                        // TODO parse_paragraph or error?
-                        // still on 2nd #/-/_
+                        token_kind = self.peek_token().token_kind;
                     }
+
+                    // CommonMark allows optional spaces after a thematic break - we don't!
+                    // so the line the thematic break is in has to end in a newline right
+                    // after the thematic break (---)
+                    if (self.peek_token().token_kind != TokenKind.Newline) {
+                        // \\ starts a zig multiline string-literal that goes until the end
+                        // of the line, \n is only added if the next line starts with a \\
+                        // alternatively you could use ++ at the end of the line to concat
+                        // the arrays
+                        // recognizes --- of table sep as invalid thematic break
+                        // -> always require table rows to start with |
+                        std.log.err("Line {}: " ++
+                                    "A line with a thematic break (consisting of at least 3 '-'" ++
+                                    " can only contain whitespace, comments or the " ++
+                                    "character that started the break and has to end in a new line!\n",
+                                    .{ self.peek_token().line_nr });
+                        return ParseError.SyntaxError;
+                    } else {
+                        var thematic_break = try self.new_node(self.get_last_block());
+                        thematic_break.data = .ThematicBreak;
+                        std.debug.print("Found valid thematic break! starting with: '{}'\n",
+                                        .{start_token_kind});
+                    }
+                } else {
+                    // error here otherwise we'd have to backtrack - how often do you
+                    // really want to start a paragraph with *-+_ without wanting
+                    // a thematic break / list?
+                    // still on 2nd #/-/_
+                    Parser.report_error(
+                        "ln:{}: Characters '-' and '+' that start a new paragraph need to " ++
+                        "either be part of an unordered list ('- Text') or a thematic break " ++
+                        "(at least three '-')!\n", .{ self.peek_token().line_nr });
+                    return ParseError.SyntaxError;
                 }
             },
 
@@ -295,10 +316,9 @@ const Parser = struct {
                     try self.require_token(TokenKind.Space, " after list item starter!");
                     self.eat_token();
 
-                    var list_node = try self.new_node();
+                    var list_node = try self.new_node(self.get_last_block());
                     list_node.data = .OrderedList;
                     // TODO can only be opened inside another container block
-                    self.last_block().append_child(list_node);
                     self.open_block(list_node);
 
                     // TODO parse_list_item; move this into it v
@@ -329,7 +349,7 @@ const Parser = struct {
                 const lang_name_end = self.peek_token().start;
                 self.eat_token();
 
-                var code_node = try self.new_node();
+                var code_node = try self.new_node(self.get_last_block());
                 code_node.data = .{
                     .FencedCode = .{
                         .language_name =
@@ -339,7 +359,6 @@ const Parser = struct {
                         .code = undefined,
                     },
                 };
-                self.last_block().append_child(code_node);
                 self.open_block(code_node);
 
                 std.debug.print("Found code block ln{}: lang_name {}\n",
@@ -350,6 +369,12 @@ const Parser = struct {
 
             TokenKind.Colon_open_bracket => {
                 // link reference definition
+                if (self.open_block_idx > 0) {
+                    Parser.report_error(
+                        "ln:{}: References must be defined at the document level!\n",
+                        .{ self.peek_token() });
+                    return ParseError.SyntaxError;
+                }
                 self.eat_token();
 
                 var token = self.peek_token();
@@ -384,7 +409,8 @@ const Parser = struct {
                     ". A space is required between reference label and reference content!");
                 self.eat_token();
 
-                var reference_def = try self.new_node();
+                // reference definitions are alywas direct children of the document
+                var reference_def = try self.new_node(self.current_document);
                 reference_def.data = .{
                     .LinkRef = .{
                         .label = self.tokenizer.bytes[ref_name_start..ref_name_end],
@@ -392,10 +418,6 @@ const Parser = struct {
                         .title = null,
                     },
                 };
-
-                // TODO make sure we're not in another container block etc.
-                // reference definitions are alywas direct children of the document
-                self.current_document.append_child(reference_def);
 
                 try self.parse_link_destination();
             },
@@ -408,17 +430,118 @@ const Parser = struct {
 
             else => {
                 // std.debug.print("Else branch ln {}\n", .{ self.peek_token().line_nr });
-                self.eat_token();
+                // self.eat_token();
 
-                var token_kind = self.peek_token().token_kind;
-                while (token_kind != TokenKind.Newline and token_kind != TokenKind.Eof) {
-                    // std.debug.print("Ate token {} ln {}\n", .{ token_kind, self.peek_token().line_nr });
-                    self.eat_token();
-                    token_kind = self.peek_token().token_kind;
-                }
+                // var token_kind = self.peek_token().token_kind;
+                // while (token_kind != TokenKind.Newline and token_kind != TokenKind.Eof) {
+                //     // std.debug.print("Ate token {} ln {}\n", .{ token_kind, self.peek_token().line_nr });
+                //     self.eat_token();
+                //     token_kind = self.peek_token().token_kind;
+                // }
+                // // will end on newline token -> need to advance one more
+                // self.eat_token();
+                try self.parse_paragraph();
                 // will end on newline token -> need to advance one more
                 self.eat_token();
             },
+        }
+    }
+
+    fn parse_paragraph(self: *Parser) !void {
+        var paragraph = try self.new_node(self.get_last_block());
+        paragraph.data = NodeKind.Paragraph;
+        self.open_block(paragraph);
+        while (true) {
+            if(self.peek_token().token_kind == TokenKind.Newline) {
+                self.eat_token();
+                if (self.peek_token().token_kind == TokenKind.Newline) {
+                    break;
+                }
+            }
+            try self.parse_inline();
+            // std.debug.print("Tok: {} NExt {}\n", .{ self.peek_token().token_kind, self.peek_next_token().token_kind });
+        }
+        self.eat_token();  // eat 2nd \n
+
+        std.debug.print("Last block: {}\n", .{ self.get_last_block().data });
+        if (self.get_last_block().data != NodeKind.Paragraph) {
+            Parser.report_error(
+                "ln:{}: There was at least one unclosed inline element of type '{}'\n",
+                .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
+            return ParseError.SyntaxError;
+        }
+        self.close_last_block();
+    }
+
+    fn parse_inline(self: *Parser) !void {
+        var token = self.peek_token();
+        switch (token.token_kind) {
+            TokenKind.Newline, TokenKind.Eof => return,
+            TokenKind.Hard_line_break => {
+                self.eat_token();
+                // TODO last_node is not correct
+                var line_break = try self.new_node(self.last_node);
+                line_break.data = NodeKind.HardLineBreak;
+            },
+            TokenKind.Asterisk, TokenKind.Underscore => {
+                // check if we close the last emph block or open one
+                // **fat _also cursive_**
+                //                    ^ closes _
+                // ** fat _also cursive** also cursive_ <- not allowed!
+                // NOTE: technichally not a block in the markdown sense but since it can
+                // have children as an AST node we treat it as one
+                const last_block = self.get_last_block();
+                const current_token_kind = self.peek_token().token_kind;
+                if (last_block.data == NodeKind.Emphasis) {
+                    const opener_token_kind = last_block.data.Emphasis.opener_token_kind;
+                    if (last_block.data.Emphasis.opener_token_kind != current_token_kind) {
+                        Parser.report_error(
+                            "ln:{}: Wrong emphasis closer (expected '{}' got '{}')!\n",
+                            .{ self.peek_token().line_nr, opener_token_kind, current_token_kind });
+                        return ParseError.SyntaxError;
+                    }
+
+                    std.debug.print("Close emphasis ln:{}: token: {}\n",
+                                    .{ self.peek_token().line_nr, current_token_kind });
+                    self.close_last_block();
+                } else {
+                    var emph_node = try self.new_node(self.last_node);
+                    emph_node.data = .{
+                        .Emphasis = .{ .opener_token_kind = current_token_kind },
+                    };
+                    std.debug.print("Open emphasis ln:{}: token: {} last block: {}\n",
+                                    .{ self.peek_token().line_nr, current_token_kind, last_block.data });
+                    self.open_block(emph_node);
+                }
+                self.eat_token();
+            },
+            TokenKind.Asterisk_double, TokenKind.Underscore_double => {
+                const last_block = self.get_last_block();
+                const current_token_kind = self.peek_token().token_kind;
+                if (last_block.data == NodeKind.StrongEmphasis) {
+                    const opener_token_kind = last_block.data.StrongEmphasis.opener_token_kind;
+                    if (last_block.data.StrongEmphasis.opener_token_kind != current_token_kind) {
+                        Parser.report_error(
+                            "ln:{}: Wrong strong emphasis closer (expected '{}' got '{}')!\n",
+                            .{ self.peek_token().line_nr, opener_token_kind, current_token_kind });
+                        return ParseError.SyntaxError;
+                    }
+
+                    std.debug.print("Close strong emphasis ln:{}: token: {}\n",
+                                    .{ self.peek_token().line_nr, current_token_kind });
+                    self.close_last_block();
+                } else {
+                    var emph_node = try self.new_node(self.last_node);
+                    emph_node.data = .{
+                        .StrongEmphasis = .{ .opener_token_kind = current_token_kind },
+                    };
+                    std.debug.print("Open strong emphasis ln:{}: token: {}\n",
+                                    .{ self.peek_token().line_nr, current_token_kind });
+                    self.open_block(emph_node);
+                }
+                self.eat_token();
+            },
+            else => { self.eat_token(); },
         }
     }
 
@@ -448,7 +571,7 @@ const Parser = struct {
                         "ln:{}: Code block's indent decreased beyond it's starting level!",
                         .{ current_token.line_nr });
 
-                    return ParserError.SyntaxError;
+                    return ParseError.SyntaxError;
                 }
             } else {
                 if (line_start) {
@@ -472,7 +595,7 @@ const Parser = struct {
             current_token = self.peek_token();
         }
 
-        const code_block = self.last_block();
+        const code_block = self.get_last_block();
         // string_buf.toOwnedSlice() -> caller owns the returned memory (remaining capacity is free'd)
         code_block.data.FencedCode.code = string_buf.toOwnedSlice();
 
@@ -566,46 +689,8 @@ const Parser = struct {
     }
 };
 
-const NodeKind = enum {
-    // special
-    Undefined,
-    Document,
-    Import,
-
-    // block
-    // leaf blocks
-    ThematicBreak,
-
-    Heading,
-
-    FencedCode,
-
-    HtmlBlock,
-
-    LinkRef,
-
-    Paragraph,
-    BlankLine, // ?
-
-    // container blocks
-    BlockQuote,
-
-    BulletList,
-    BulletListItem,
-
-    OrderedList,
-    OrderedListItem,
-    
-    // ?
-    Table,
-    TableRow,
-
-    // inline
-    Text,
-    Link,
-    Image,  // inline apparently
-};
-
+// meta.TagType gets union's enum tag type (by using @typeInfo(T).tag_type)
+const NodeKind = std.meta.TagType(Node.NodeData);
 const Node = struct {
     parent: ?*Node,
 
@@ -618,8 +703,9 @@ const Node = struct {
     data: NodeData,
 
     const LinkData = struct { label: []const u8, url: []const u8, title: ?[]const u8 };
+    const EmphData = struct { opener_token_kind: TokenKind };
     // tagged union
-    const NodeData = union(NodeKind) {
+    const NodeData = union(enum) {
         // special
         Undefined,
         Document,
@@ -634,8 +720,6 @@ const Node = struct {
         // TODO free code buffer
         FencedCode: struct { language_name: []const u8, code: []const u8 },
 
-        HtmlBlock,
-
         LinkRef: LinkData,
 
         Image,  // inline in CommonMark - leaf block here
@@ -646,8 +730,8 @@ const Node = struct {
         // container blocks
         BlockQuote,
 
-        BulletList,
-        BulletListItem,
+        UnorderedList,
+        UnorderedListItem,
 
         OrderedList,
         OrderedListItem,
@@ -657,8 +741,14 @@ const Node = struct {
         TableRow,
 
         // inline
-        Text,
+        CodeSpan,
+        Emphasis: EmphData,
+        StrongEmphasis: EmphData,
         Link: LinkData,
+        Autolink,
+        // add SoftLineBreak ? are basically ignored and are represented by single \n
+        HardLineBreak,
+        Text,
     };
 
     pub inline fn create(allocator: *std.mem.Allocator) !*Node {
@@ -712,7 +802,7 @@ pub fn DepthFirstIterator(comptime T: type) type {
     return struct {
         const Self = @This();  // polymorphic type
         const Queue = std.TailQueue(*T);
-        const QNode = Queue.Node;
+        const QNode = Queue.Node;  // node type used in TailQueue
 
         allocator: *std.mem.Allocator,
         node_buf: std.ArrayList(QNode),
