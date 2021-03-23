@@ -174,6 +174,7 @@ const Parser = struct {
         switch (self.peek_token().token_kind) {
             TokenKind.Comment => {
                 self.eat_token();
+                // eat \n since the comment started the line
                 self.eat_token();  // eat \n
             },
             TokenKind.Newline => {
@@ -252,11 +253,14 @@ const Parser = struct {
                 self.eat_token();
 
                 const next_token = self.peek_token();
+                std.debug.print("Start {} Next {} 3rd {}\n",
+                    .{ start_token_kind, next_token.token_kind, self.peek_next_token().token_kind });
                 if (next_token.token_kind == TokenKind.Space) {
                     // TODO unordered list (can be started while in a container block)
-                } else if (start_token_kind != TokenKind.Plus and
+                } else if (start_token_kind == TokenKind.Dash and
                            next_token.token_kind == TokenKind.Dash and
                            self.peek_next_token().token_kind == TokenKind.Dash) {
+                    self.eat_token();
                     self.eat_token();
 
                     // thematic break
@@ -441,8 +445,6 @@ const Parser = struct {
                 // // will end on newline token -> need to advance one more
                 // self.eat_token();
                 try self.parse_paragraph();
-                // will end on newline token -> need to advance one more
-                self.eat_token();
             },
         }
     }
@@ -457,6 +459,10 @@ const Parser = struct {
                 if (self.peek_token().token_kind == TokenKind.Newline) {
                     break;
                 }
+            } else if (self.peek_token().token_kind == TokenKind.Eof) {
+                // TODO @Hack
+                self.close_last_block();
+                return;
             }
             try self.parse_inline();
             // std.debug.print("Tok: {} NExt {}\n", .{ self.peek_token().token_kind, self.peek_next_token().token_kind });
