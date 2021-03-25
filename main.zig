@@ -55,7 +55,23 @@ const Parser = struct {
     open_blocks: [50]*Node,
     open_block_idx: u8,
 
+    // each error name across the entire compilation gets assigned an unsigned
+    // integer greater than 0. You are allowed to declare the same error name
+    // more than once, and if you do, it gets assigned the same integer value
+    //
+    // inferred error sets:
+    // When a function has an inferred error set, that function becomes generic
+    // and thus it becomes trickier to do certain things with it, such as
+    // obtain a function pointer, or have an error set that is consistent
+    // across different build targets. Additionally, inferred error sets are
+    // incompatible with recursion. 
+    // In these situations, it is recommended to use an explicit error set. You
+    // can generally start with an empty error set and let compile errors guide
+    // you toward completing the set. 
+    // e.g. changing !void to ParseError!void gives the error msg:
+    // not a member of destination error set error{OutOfMemory}
     const ParseError = error {
+        OutOfMemory,
         SyntaxError,
         ExceededOrderedListDigits,
     };
@@ -120,7 +136,7 @@ const Parser = struct {
         self.open_block_idx -= 1;
     }
 
-    pub fn parse(self: *Parser) !void {
+    pub fn parse(self: *Parser) ParseError!void {
         // tokenize the whole file first so we can use ptrs that don't get invalidated
         // due to resizing; maybe also faster for successful compiles since
         // better cache friendlyness?
@@ -170,7 +186,7 @@ const Parser = struct {
         std.log.err(err_msg, args);
     }
 
-    fn parse_block(self: *Parser) !void {
+    fn parse_block(self: *Parser) ParseError!void {
         switch (self.peek_token().token_kind) {
             TokenKind.Comment => {
                 self.eat_token();
@@ -422,8 +438,10 @@ const Parser = struct {
                         .title = null,
                     },
                 };
+                self.open_block(reference_def);
 
                 try self.parse_link_destination();
+                self.close_last_block();
             },
 
             // TokenKind.Close_angle_bracket => {
@@ -449,7 +467,7 @@ const Parser = struct {
         }
     }
 
-    fn parse_paragraph(self: *Parser) !void {
+    fn parse_paragraph(self: *Parser) ParseError!void {
         var paragraph = try self.new_node(self.get_last_block());
         paragraph.data = NodeKind.Paragraph;
         self.open_block(paragraph);
@@ -469,7 +487,9 @@ const Parser = struct {
         }
         self.eat_token();  // eat 2nd \n
 
-        std.debug.print("Last block: {}\n", .{ self.get_last_block().data });
+        // std.debug.print("ended on ln:{}: Last block: {}\n",
+        //     .{ self.peek_token().line_nr ,self.get_last_block().data });
+
         if (self.get_last_block().data != NodeKind.Paragraph) {
             Parser.report_error(
                 "ln:{}: There was at least one unclosed inline element of type '{}'\n",
@@ -479,13 +499,17 @@ const Parser = struct {
         self.close_last_block();
     }
 
-    fn parse_inline(self: *Parser) !void {
-        var token = self.peek_token();
+    fn parse_inline(self: *Parser) ParseError!void {
+        const token = self.peek_token();
         switch (token.token_kind) {
             TokenKind.Newline, TokenKind.Eof => return,
+            TokenKind.Decrease_indent, TokenKind.Increase_indent => {
+                // TODO only for now so we don't infinite loop
+                self.eat_token();
+            },
+            TokenKind.Comment => self.eat_token(),
             TokenKind.Hard_line_break => {
                 self.eat_token();
-                // TODO last_node is not correct
                 var line_break = try self.new_node(self.last_node);
                 line_break.data = NodeKind.HardLineBreak;
             },
@@ -547,11 +571,103 @@ const Parser = struct {
                 }
                 self.eat_token();
             },
-            else => { self.eat_token(); },
+            TokenKind.Open_bracket => {
+                try self.parse_link();
+            },
+            else => {
+                const parent = self.last_node;
+                if (parent.data == NodeKind.Text) {
+                    // enlarge slice by directly manipulating the length (which is allowed in zig)
+                    // TODO backslash escaped text will result in faulty text, since the
+                    // backslash is included but the escaped text isn't and this as a whole ends
+                    // up making the text buffer too narrow
+                    parent.data.Text.text.len += token.end - token.start;
+                    // const tok_text = if (token.token_kind != TokenKind.Decrease_indent) token.text(self.tokenizer.bytes) else token.token_kind.name();
+                    // std.debug.print("Tok kind {} text: {}\n", .{ token.token_kind,  tok_text });
+                    // std.debug.print("ln:{}: Enlarged text node: {}\n", .{ token.line_nr, parent.data.Text.text });
+                } else {
+                    var text_node = try self.new_node(parent);
+                    text_node.data = .{
+                        .Text = .{ .text =  self.tokenizer.bytes[token.start..token.end] },
+                    };
+                }
+                self.eat_token();
+            },
         }
     }
 
-    fn parse_code_block(self: *Parser) !void {
+    fn parse_link(self: *Parser) ParseError!void {
+        // still on [ token
+        self.eat_token();
+
+        var link_node = try self.new_node(self.last_node);
+        link_node.data = .{
+            .Link = .{ .label =  null, .url = null, .title = null, },
+        };
+        self.open_block(link_node);
+
+        var token = self.peek_token();
+        const link_text_start_token = token;
+        while (true) {
+            switch (token.token_kind) {
+                TokenKind.Close_bracket => {
+                    const last_block = self.get_last_block();
+                    if (last_block.data != NodeKind.Link) {
+                        Parser.report_error(
+                            "ln:{}: Unclosed {} in Link text (first [] of a link definition)\n",
+                            .{ self.peek_token().line_nr, @tagName(last_block.data) });
+                        return ParseError.SyntaxError;
+                    }
+                    self.eat_token();
+                    break;
+                },
+                TokenKind.Newline => self.eat_token(),
+                TokenKind.Eof => {
+                    Parser.report_error(
+                        "ln:{}: Encountered end of file inside link text\n",
+                        .{ self.peek_token().line_nr });
+                    return ParseError.SyntaxError;
+                },
+                else => try self.parse_inline(),
+            }
+
+            token = self.peek_token();
+        }
+        const link_text_end = token.start;
+
+        token = self.peek_token();
+        if (token.token_kind == TokenKind.Open_bracket) {
+            // start of link label referring to a reference definition
+            self.eat_token();
+
+            token = self.peek_token();
+            const start_token = token;
+            while (true) {
+                if (token.token_kind != TokenKind.Close_bracket) {
+                    break;
+                } else if (token.token_kind == TokenKind.Eof) {
+                    Parser.report_error(
+                        "ln:{}: Encountered end-of-file inside Link label brackets\n",
+                        .{ token.line_nr });
+                    return ParseError.SyntaxError;
+                }
+                self.eat_token();
+            }
+            const label_end = token.start;
+            link_node.data.Link.label = self.tokenizer.bytes[start_token.start..label_end];
+        } else if (token.token_kind == TokenKind.Open_paren) {
+            // start of url
+            try self.parse_link_destination();  // expects to start on (
+        } else {
+            // use link text as link label referring to a reference definition
+            link_node.data.Link.label = self.tokenizer.bytes[link_text_start_token.start..link_text_end];
+        }
+        self.close_last_block();
+
+        std.debug.print("ln:{}: Link: {}\n", .{ link_text_start_token.line_nr, link_node.data });
+    }
+
+    fn parse_code_block(self: *Parser) ParseError!void {
         const starting_lvl = self.tokenizer.indent_lvl;
         // ArrayList doesn't accept ArenaAllocator directly so we need to
         // pass string_arena.allocator which is the proper mem.Allocator
@@ -610,7 +726,7 @@ const Parser = struct {
     }
 
     /// when this method is called we're still on the first '('
-    fn parse_link_destination(self: *Parser) !void {
+    fn parse_link_destination(self: *Parser) ParseError!void {
         try self.require_token(TokenKind.Open_paren, ". Link destinations need to be wrapped in parentheses!");
         self.eat_token();  // eat (
 
@@ -642,7 +758,9 @@ const Parser = struct {
             return ParseError.SyntaxError;
         }
 
-        const link_or_ref = self.last_node;
+        const link_or_ref = self.get_last_block();
+        std.debug.print("ln:{}: Parse destination -> Link or ref: {}\n",
+            .{ self.peek_token().line_nr , @tagName(self.get_last_block().data) });
         if (ended_on_link_title) {
             self.eat_token();  // eat "
             token = self.peek_token();
@@ -708,7 +826,7 @@ const Node = struct {
     // separate kind field
     data: NodeData,
 
-    const LinkData = struct { label: []const u8, url: []const u8, title: ?[]const u8 };
+    const LinkData = struct { label: ?[]const u8, url: ?[]const u8, title: ?[]const u8 };
     const EmphData = struct { opener_token_kind: TokenKind };
     // tagged union
     const NodeData = union(enum) {
@@ -754,7 +872,7 @@ const Node = struct {
         Autolink,
         // add SoftLineBreak ? are basically ignored and are represented by single \n
         HardLineBreak,
-        Text,
+        Text: struct { text: []const u8 },
     };
 
     pub inline fn create(allocator: *std.mem.Allocator) !*Node {

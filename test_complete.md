@@ -42,7 +42,7 @@ At vero eos et accusam et justo
 duo dolores et ea rebum. Stet clita kasd gubergren.
 
 Links spanning over a line break [link
-wrapping lines](https://google.com) same for **emphasis
+wrapping lines](https://link-wrapping-lines.com) same for **emphasis
 here**
 
 ## Text styles
