@@ -29,9 +29,8 @@ pub const Node = struct {
         // leaf blocks
         ThematicBreak,
 
-        Heading: struct { level: i16, text: []const u8 },
+        Heading: struct { level: u8 },
 
-        // TODO free code buffer
         FencedCode: struct { language_name: []const u8, code: []const u8 },
 
         LinkRef: LinkData,
@@ -103,6 +102,14 @@ pub const Node = struct {
         return switch (self.data) {
             .ThematicBreak, .Heading, .FencedCode, .LinkRef, .Paragraph, .BlankLine, .Image => true,
             else => false,
+        };
+    }
+
+    pub inline fn children_allowed(self: *Node) bool {
+        return switch (self.data) {
+            .Undefined, .CodeSpan, .ThematicBreak, .FencedCode, .LinkRef,
+            .BlankLine, .Image, .Autolink, .HardLineBreak, .Text => false,
+            else => true,
         };
     }
 

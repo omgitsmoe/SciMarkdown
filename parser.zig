@@ -21,8 +21,13 @@ pub const Parser = struct {
     tk_index: u32,
 
     current_document: *Node,
-    last_node: *Node,
-    // first open_block is always current_document
+    // keep track of last text node so we don't have to create a new one for at least
+    // every word
+    // opening or closing of blocks sets this to null
+    last_text_node: ?*Node,
+    /// these are not blocks in the markdown sense but rather parent nodes
+    /// in general
+    /// first open_block is always current_document
     open_blocks: [50]*Node,
     open_block_idx: u8,
 
@@ -59,7 +64,7 @@ pub const Parser = struct {
             .tk_index = 0,
 
             .current_document = undefined,
-            .last_node = undefined,
+            .last_text_node = null,
             .open_blocks = undefined,
             .open_block_idx = 0,
         };
@@ -71,7 +76,6 @@ pub const Parser = struct {
         var current_document = try Node.create(allocator);
         current_document.data = .Document;
         parser.current_document = current_document;
-        parser.last_node = current_document;
         parser.open_blocks[0] = current_document;
 
         return parser;
@@ -86,15 +90,19 @@ pub const Parser = struct {
     }
 
     inline fn new_node(self: *Parser, parent: *Node) !*Node {
+        // if (!parent.children_allowed()) {
+        //     std.debug.print("ln:{}: NO CHILDREN: {}\n", .{self.peek_token().line_nr, parent.data});
+        // }
+        std.debug.assert(parent.children_allowed());
         const node = try Node.create(&self.node_arena.allocator);
         parent.append_child(node);
-        self.last_node = node;
         return node;
     }
 
     inline fn open_block(self: *Parser, block: *Node) void {
         self.open_block_idx += 1;
         self.open_blocks[self.open_block_idx] = block;
+        self.last_text_node = null;
     }
 
     /// does no bounds checking
@@ -105,6 +113,7 @@ pub const Parser = struct {
     inline fn close_last_block(self: *Parser) void {
         std.debug.assert(self.open_block_idx > 0);
         self.open_block_idx -= 1;
+        self.last_text_node = null;
     }
 
     pub fn parse(self: *Parser) ParseError!void {
@@ -183,7 +192,7 @@ pub const Parser = struct {
                 // 1-6 unescaped # followed by ' ' or end-of-line
                 // not doing: optional closing # that don't have to match the number of opening #
 
-                var heading_lvl: i16 = 1;
+                var heading_lvl: u8 = 1;
                 self.eat_token();
                 while (self.peek_token().token_kind == TokenKind.Hash) {
                     heading_lvl += 1;
@@ -196,37 +205,28 @@ pub const Parser = struct {
                     Parser.report_error(
                         "ln:{}: Headings can only go up to level 6 and have to be followed by a" ++
                         " space and heading text! If you didn't want to create a heading" ++
-                        " escacpe the first '#' with a '\\'", .{ tok_after_hashes.line_nr });
+                        " escape the first '#' with a '\\'", .{ tok_after_hashes.line_nr });
                     return ParseError.SyntaxError;
                 } else {
                     // TODO close_open_block
                     self.eat_token();  // eat space
 
-                    // could be multiple text or other kinds of tokens that should be
-                    // interpreted as text
-                    // TODO => this should be replaced by parse inline
-                    // TODO open block
-                    const heading_name_start = self.peek_token().start;
                     // TODO make sure we account for sudden Eof everywhere
-                    while (self.peek_token().token_kind != TokenKind.Newline and
-                            self. peek_token().token_kind != TokenKind.Eof) {
-                        self.eat_token();
-                    }
-                    const heading_name_end = self.peek_token().start;
-                    if (heading_name_start == heading_name_end) {
+                    if (self.peek_token().token_kind == TokenKind.Newline or
+                            self. peek_token().token_kind == TokenKind.Eof) {
                         Parser.report_error("ln:{}: Empty heading name!", .{ self.peek_token().line_nr });
                         return ParseError.SyntaxError;
                     }
 
                     var heading_node: *Node = try self.new_node(self.current_document);
                     heading_node.data = .{
-                        .Heading = .{ .level = heading_lvl,
-                                      .text = self.tokenizer.bytes[heading_name_start..heading_name_end] },
+                        .Heading = .{ .level = heading_lvl },
                     };
+                    self.open_block(heading_node);
 
-                    std.debug.print(
-                        "Heading: level {} text: '{}'\n",
-                        .{ heading_node.data.Heading.level, heading_node.data.Heading.text });
+                    std.debug.print("Heading: level {}\n", .{ heading_node.data.Heading.level });
+                    try self.parse_inline_until(TokenKind.Newline);
+                    self.close_last_block();
                 }
             },
 
@@ -470,6 +470,19 @@ pub const Parser = struct {
         self.close_last_block();
     }
 
+    /// eats the token_kind token; EOF is not consumed
+    fn parse_inline_until(self: *Parser, token_kind: TokenKind) ParseError!void {
+        while (true) {
+            if(self.peek_token().token_kind == token_kind) {
+                self.eat_token();
+                return;
+            } else if (self.peek_token().token_kind == TokenKind.Eof) {
+                return;
+            }
+            try self.parse_inline();
+        }
+    }
+
     fn parse_inline(self: *Parser) ParseError!void {
         const token = self.peek_token();
         switch (token.token_kind) {
@@ -481,8 +494,10 @@ pub const Parser = struct {
             TokenKind.Comment => self.eat_token(),
             TokenKind.Hard_line_break => {
                 self.eat_token();
-                var line_break = try self.new_node(self.last_node);
+                var line_break = try self.new_node(self.get_last_block());
                 line_break.data = NodeKind.HardLineBreak;
+                // IMPORTANT! invalidate last text block
+                self.last_text_node = null;
             },
             TokenKind.Asterisk, TokenKind.Underscore => {
                 // check if we close the last emph block or open one
@@ -506,7 +521,7 @@ pub const Parser = struct {
                                     .{ self.peek_token().line_nr, current_token_kind });
                     self.close_last_block();
                 } else {
-                    var emph_node = try self.new_node(self.last_node);
+                    var emph_node = try self.new_node(self.get_last_block());
                     emph_node.data = .{
                         .Emphasis = .{ .opener_token_kind = current_token_kind },
                     };
@@ -532,7 +547,7 @@ pub const Parser = struct {
                                     .{ self.peek_token().line_nr, current_token_kind });
                     self.close_last_block();
                 } else {
-                    var emph_node = try self.new_node(self.last_node);
+                    var emph_node = try self.new_node(self.get_last_block());
                     emph_node.data = .{
                         .StrongEmphasis = .{ .opener_token_kind = current_token_kind },
                     };
@@ -546,21 +561,25 @@ pub const Parser = struct {
                 try self.parse_link();
             },
             else => {
-                const parent = self.last_node;
-                if (parent.data == NodeKind.Text) {
+                if (self.last_text_node) |continue_text| {
                     // enlarge slice by directly manipulating the length (which is allowed in zig)
                     // TODO backslash escaped text will result in faulty text, since the
                     // backslash is included but the escaped text isn't and this as a whole ends
                     // up making the text buffer too narrow
-                    parent.data.Text.text.len += token.end - token.start;
+                    continue_text.data.Text.text.len += token.end - token.start;
                     // const tok_text = if (token.token_kind != TokenKind.Decrease_indent) token.text(self.tokenizer.bytes) else token.token_kind.name();
                     // std.debug.print("Tok kind {} text: {}\n", .{ token.token_kind,  tok_text });
-                    // std.debug.print("ln:{}: Enlarged text node: {}\n", .{ token.line_nr, parent.data.Text.text });
+                    std.debug.print("ln:{}: Enlarged text node: {}\n",
+                        .{ token.line_nr, continue_text.data.Text.text });
                 } else {
+                    const parent = self.get_last_block();
                     var text_node = try self.new_node(parent);
                     text_node.data = .{
                         .Text = .{ .text =  self.tokenizer.bytes[token.start..token.end] },
                     };
+                    self.last_text_node = text_node;
+
+                    std.debug.print("Text node content: '''{}'''\n", .{ text_node.data.Text.text });
                 }
                 self.eat_token();
             },
@@ -571,7 +590,7 @@ pub const Parser = struct {
         // still on [ token
         self.eat_token();
 
-        var link_node = try self.new_node(self.last_node);
+        var link_node = try self.new_node(self.get_last_block());
         link_node.data = .{
             .Link = .{ .label =  null, .url = null, .title = null, },
         };
