@@ -1,7 +1,11 @@
 const std = @import("std");
 
 // zig gets polymorphism/generics by using compile time functions that return a type
-pub fn DepthFirstIterator(comptime T: type) type {
+/// skip_start_wo_children: skips is_end=false NodeInfo for items without children
+pub fn DepthFirstIterator(
+    comptime T: type,
+    comptime skip_start_wo_children: bool
+) type {
     return struct {
         const Self = @This();  // polymorphic type
         // need struct to be able to signal nodes starting/ending for
@@ -45,7 +49,14 @@ pub fn DepthFirstIterator(comptime T: type) type {
 
             if (!item.is_end) {
                 if (item.data.first_child) |child| {
-                    self.next_item = NodeInfo{ .data = child, .is_end = false };
+                    if (skip_start_wo_children) {
+                        self.next_item = NodeInfo{
+                            .data = child,
+                            .is_end = if (child.first_child == null) true else false
+                        };
+                    } else {
+                        self.next_item = NodeInfo{ .data = child, .is_end = false };
+                    }
                 } else {
                     // end node since it doesn't have children
                     self.next_item = NodeInfo{ .data = item.data, .is_end = true };
@@ -56,13 +67,27 @@ pub fn DepthFirstIterator(comptime T: type) type {
                     return null;
                 } else if (item.data.next) |sibling| {
                     // current node has been completely traversed -> q sibling
-                    // NOTE: checking if sibling is also an end node that doesn't have children
-                    // so we don't get one is_end=true and one false version
-                    // TODO @Robustness is this a good idea?
-                    self.next_item = NodeInfo{
-                        .data = sibling,
-                        .is_end = if (sibling.first_child == null) true else false,
-                    };
+
+                    // skip_start_sibling_wo_children is comptime known (comptime error if not)
+                    // and Zig implicitly inlines if expressions when the condition is
+                    // known at compile-time
+                    // -> one of these branches will not be part of the runtime function
+                    // depending on the bool passed to DepthFirstIterator
+                    // cant use comptime { }
+                    // since it forces the entire expression (inside {}) to be compile time
+                    // (which fails on sibling.first_child etc.)
+                    // so we just have to trust that this gets comptime evaluated (also called
+                    // inlined in Zig) since skip_start_sibling_wo_children is comptime
+                    if (skip_start_wo_children) {
+                        // NOTE: checking if sibling is also an end node that doesn't have children
+                        // so we don't get one is_end=true and one false version
+                        self.next_item = NodeInfo{
+                            .data = sibling,
+                            .is_end = if (sibling.first_child == null) true else false,
+                        };
+                    } else {
+                        self.next_item = NodeInfo{ .data = sibling, .is_end = false };
+                    }
                 } else if (item.data.parent) |parent| {
                     // no siblings and no children (since is_end is false) -> signal
                     // parent node has been traversed completely

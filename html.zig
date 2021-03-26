@@ -20,7 +20,7 @@ pub const HTMLGenerator = struct {
     }
 
     pub fn generate(self: *HTMLGenerator) ![]const u8 {
-        var dfs = DFS(Node).init(self.start_node);
+        var dfs = DFS(Node, true).init(self.start_node);
 
         try self.html_buf.appendSlice(
             \\<html>
