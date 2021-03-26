@@ -1,8 +1,6 @@
 const std = @import("std");
 
 const tokenizer = @import("tokenizer.zig");
-// const Tokenizer = tokenizer.Tokenizer;
-// const Token = tokenizer.Token;
 const TokenKind = tokenizer.TokenKind;
 
 // meta.TagType gets union's enum tag type (by using @typeInfo(T).tag_type)

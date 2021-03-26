@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const Parser = @import("parser.zig").Parser;
+const HTMLGenerator = @import("html.zig").HTMLGenerator;
 
 pub fn main() !void {
     // gpa optimized for safety over performance; can detect leaks, double-free and use-after-free
@@ -33,4 +34,17 @@ pub fn mainArgs(allocator: *std.mem.Allocator, args: []const []const u8) !void {
     var parser: Parser = try Parser.init(allocator, root_file_name);
     defer parser.deinit();
     try parser.parse();
+
+    var html_gen = try HTMLGenerator.init(allocator, parser.current_document);
+    const html_out = try html_gen.generate();
+    // std.debug.print("{}\n", .{ html_out });
+
+    const file = try std.fs.cwd().createFile(
+        "test.html",
+        // truncate: reduce file to length 0 if it exists
+        .{ .read = true, .truncate = true },
+    );
+    defer file.close();
+
+    try file.writeAll(html_out);
 }
