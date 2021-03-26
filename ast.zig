@@ -54,9 +54,10 @@ pub const Node = struct {
         TableRow,
 
         // inline
-        CodeSpan,
+        CodeSpan: struct { text: []const u8 },
         Emphasis: EmphData,
         StrongEmphasis: EmphData,
+        Strikethrough,
         Link: LinkData,
         Autolink,
         // add SoftLineBreak ? are basically ignored and are represented by single \n

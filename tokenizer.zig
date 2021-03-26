@@ -315,7 +315,14 @@ pub const Tokenizer = struct {
                         break :blk TokenKind.Underscore;
                     }
                 },
-                '~' => .Tilde,
+                '~' => blk: {
+                    if (self.peek_next_byte() == @intCast(u8, '~')) {
+                        self.prechecked_advance_to_next_byte();
+                        break :blk TokenKind.Tilde_double;
+                    } else {
+                        break :blk TokenKind.Tilde;
+                    }
+                },
                 '-' => .Dash,
                 '+' => .Plus,
 
@@ -413,7 +420,7 @@ pub const Tokenizer = struct {
                     while (self.peek_next_byte()) |next_byte| : (self.prechecked_advance_to_next_byte()) {
                         switch (next_byte) {
                             ' ', '\t', '\r', '\n', '_', '*', '/', '\\', '`',
-                            '<', '[', ']', ')', '"' => break,
+                            '<', '[', ']', ')', '"', '~' => break,
                             else => {},
                         }
                     }

@@ -96,6 +96,8 @@ pub const Parser = struct {
         std.debug.assert(parent.children_allowed());
         const node = try Node.create(&self.node_arena.allocator);
         parent.append_child(node);
+        // invalidate last text block; doing this manually was too error prone
+        self.last_text_node = null;
         return node;
     }
 
@@ -135,6 +137,7 @@ pub const Parser = struct {
     /// does no bounds checking beyond which is integrated with zig up to ReleaseSafe mode
     /// assumes caller doesn't call peek_next_token after receiving TokenKind.Eof
     inline fn eat_token(self: *Parser) void {
+        std.debug.assert((self.tk_index + 1) < self.token_buf.items.len);
         self.tk_index += 1;
     }
 
@@ -496,8 +499,6 @@ pub const Parser = struct {
                 self.eat_token();
                 var line_break = try self.new_node(self.get_last_block());
                 line_break.data = NodeKind.HardLineBreak;
-                // IMPORTANT! invalidate last text block
-                self.last_text_node = null;
             },
             TokenKind.Asterisk, TokenKind.Underscore => {
                 // check if we close the last emph block or open one
@@ -557,6 +558,48 @@ pub const Parser = struct {
                 }
                 self.eat_token();
             },
+            TokenKind.Tilde_double => {
+                const last_block = self.get_last_block();
+                if (last_block.data == NodeKind.Strikethrough) {
+                    std.debug.print("ln:{}: Close Strikethrough\n", .{ self.peek_token().line_nr });
+                    self.close_last_block();
+                } else {
+                    var strike_node = try self.new_node(self.get_last_block());
+                    strike_node.data = .Strikethrough;
+                    std.debug.print("ln:{}: Open strikethrough\n", .{ self.peek_token().line_nr });
+                    self.open_block(strike_node);
+                }
+                self.eat_token();
+            },
+            TokenKind.Backtick => {
+                self.eat_token();
+                var ctoken = self.peek_token();
+                const code_span_start = ctoken;
+                while (ctoken.token_kind != TokenKind.Backtick) : ({
+                    // while continue expression (executed on every loop as well as when a 
+                    // continue happens)
+                    self.eat_token();
+                    ctoken = self.peek_token();
+                }) {
+                    if (ctoken.token_kind == TokenKind.Eof) {
+                        Parser.report_error(
+                            "ln:{}: Encountered end of file inside code span (`...`)",
+                            .{ code_span_start.line_nr });
+                        return ParseError.SyntaxError;
+                    }
+                }
+
+                const code_span = try self.new_node(self.get_last_block());
+                code_span.data = .{
+                    .CodeSpan = .{ 
+                        .text = self.tokenizer.bytes[code_span_start.start..self.peek_token().start]
+                    }
+                };
+                self.eat_token();  // eat closing `
+
+                std.debug.print("ln:{}: Code span: `{}`\n",
+                    .{ code_span_start.line_nr, code_span.data.CodeSpan.text });
+            },
             TokenKind.Open_bracket => {
                 try self.parse_link();
             },
@@ -582,6 +625,18 @@ pub const Parser = struct {
                     std.debug.print("Text node content: '''{}'''\n", .{ text_node.data.Text.text });
                 }
                 self.eat_token();
+
+                // TODO @Robustness? invalidate last_text_node since Newline will
+                // be consumed by caller and will most likely never reach parse_inline
+                // the swallowed newline will thus not be added to the text slice
+                // and following continuation texts that get added will be off by one
+                // alternative is to add the newline here instead but that might not be
+                // wanted all the time
+                if (self.peek_token().token_kind == TokenKind.Newline) {
+                    // std.debug.print("ln:{}: Reset last_text_node due to newline\n",
+                    //     .{ self.peek_token().line_nr });
+                    self.last_text_node = null;
+                }
             },
         }
     }
@@ -633,7 +688,8 @@ pub const Parser = struct {
             token = self.peek_token();
             const start_token = token;
             while (true) {
-                if (token.token_kind != TokenKind.Close_bracket) {
+                if (token.token_kind == TokenKind.Close_bracket) {
+                    self.eat_token();
                     break;
                 } else if (token.token_kind == TokenKind.Eof) {
                     Parser.report_error(
@@ -642,6 +698,7 @@ pub const Parser = struct {
                     return ParseError.SyntaxError;
                 }
                 self.eat_token();
+                token = self.peek_token();
             }
             const label_end = token.start;
             link_node.data.Link.label = self.tokenizer.bytes[start_token.start..label_end];
@@ -771,6 +828,7 @@ pub const Parser = struct {
 
             try self.require_token(TokenKind.Close_paren,
                                    ". Link destination needs to be enclosed in parentheses!");
+            self.eat_token();  // eat )
             
             if (link_title_start.start == link_title_end.start) {
                 Parser.report_error("ln:{}: Empty link title\n",

@@ -34,7 +34,7 @@ pub const HTMLGenerator = struct {
         while (dfs.next()) |node_info| {
             // bug in zig compiler: if a switch prong (without {}) doesn't handle an error
             // the start of the switch is reported as ignoring the error
-            std.debug.print("Node (end: {}): {}\n", .{ node_info.is_end, node_info.data.data });
+            // std.debug.print("Node (end: {}): {}\n", .{ node_info.is_end, node_info.data.data });
             switch (node_info.data.data) {
                 .Document => continue,
                 .Undefined, .Import => unreachable,
@@ -77,6 +77,18 @@ pub const HTMLGenerator = struct {
                     } else {
                         try self.html_buf.appendSlice("</strong>");
                     }
+                },
+                .Strikethrough => {
+                    if (!node_info.is_end) {
+                        try self.html_buf.appendSlice("<strike>");
+                    } else {
+                        try self.html_buf.appendSlice("</strike>");
+                    }
+                },
+                .CodeSpan => |code| {
+                    try self.html_buf.appendSlice("<code>");
+                    try self.html_buf.appendSlice(code.text);
+                    try self.html_buf.appendSlice("</code>");
                 },
                 .Link => |link| {
                     if (link.url) |url| {
