@@ -4,74 +4,75 @@ const std = @import("std");
 pub fn DepthFirstIterator(comptime T: type) type {
     return struct {
         const Self = @This();  // polymorphic type
-        const Queue = std.TailQueue(T);
-        const QNode = Queue.Node;  // node type used in TailQueue
+        // need struct to be able to signal nodes starting/ending for
+        // postorder traversal
+        pub const NodeInfo = struct {
+            data: *T,
+            is_end: bool,
+        };
 
-        // can't use an ArrayList with this since the ptrs get invalidated on resize
-        node_buf: std.heap.ArenaAllocator,
-        q: Queue,
+        start: *T,
+        next_item: ?NodeInfo,
 
-        pub fn init(allocator: *std.mem.Allocator, start: T) !Self {
-            var dfs = Self{
-                .node_buf = std.heap.ArenaAllocator.init(allocator),
-                .q = Queue{},
+        pub fn init(start: *T) Self {
+            // TODO fix after this issue gets resolved:
+            // Designated init of optional struct field segfaults in debug mode
+            // https://github.com/ziglang/zig/issues/5573
+            // .data will always be null in code below even though start can't be
+            // removing the .start field will result in Segfault when creating the NodeInfo struct
+            // see test3.zig
+            // initializing it outside the struct succeeds
+            var next_item = NodeInfo{
+                    .data = start,
+                    .is_end = false,
             };
-
-            const added = try dfs.node_buf.allocator.create(QNode);
-            added.* = QNode{ .data = start };
-            dfs.q.prepend(added);
+            var dfs = Self{
+                .start = start,
+                .next_item = undefined,
+                // .next_item = NodeInfo{
+                //     .data = start,
+                //     .is_end = false,
+                // },
+            };
+            dfs.next_item = next_item;
 
             return dfs;
         }
 
-        pub fn deinit(self: *Self) void {
-            self.node_buf.deinit();
-        }
+        // adapted from: https://github.com/kivikakk/koino/blob/main/src/ast.zig by kivikakk
+        pub fn next(self: *Self) ?NodeInfo {
+            const item = self.next_item orelse return null;
 
-        pub fn next(self: *Self) !?T {
-            if (self.q.len > 0) {
-                // we can use .? (short for "orelse unreachable") since we checked that q has items
-                const current_item = self.q.popFirst().?;
-
-                // queue the children
-                if (current_item.data.first_child) |first_child| {
-                    var current_child = first_child;
-                    // in order to preserve the child order we have to use TailQueue.insertAfter
-                    // the last queued child for every child beyond the first
-                    var last_queued = try self.queue_left(QNode{ .data = first_child });
-
-                    while (current_child.next) |child| {
-                        last_queued = try self.queue_after(last_queued, QNode{ .data = child });
-                        current_child = child;
-                    }
+            if (!item.is_end) {
+                if (item.data.first_child) |child| {
+                    self.next_item = NodeInfo{ .data = child, .is_end = false };
+                } else {
+                    // end node since it doesn't have children
+                    self.next_item = NodeInfo{ .data = item.data, .is_end = true };
                 }
-
-                return current_item.data;
             } else {
-                return null;
+                if (item.data == self.start) {
+                    // finish when reaching starting node
+                    return null;
+                } else if (item.data.next) |sibling| {
+                    // current node has been completely traversed -> q sibling
+                    // NOTE: checking if sibling is also an end node that doesn't have children
+                    // so we don't get one is_end=true and one false version
+                    // TODO @Robustness is this a good idea?
+                    self.next_item = NodeInfo{
+                        .data = sibling,
+                        .is_end = if (sibling.first_child == null) true else false,
+                    };
+                } else if (item.data.parent) |parent| {
+                    // no siblings and no children (since is_end is false) -> signal
+                    // parent node has been traversed completely
+                    self.next_item = NodeInfo{ .data = parent, .is_end = true };
+                } else {
+                    unreachable;
+                }
             }
-        }
 
-        fn queue(self: *Self, node: QNode) !*QNode {
-            // TODO look up in stdlib how ArenaAllocator is used (storing allocator separate?)
-            const new = try self.node_buf.allocator.create(QNode);
-            new.* = node;
-            self.q.append(new);
-            return new;
-        }
-
-        fn queue_after(self: *Self, after: *QNode, node: QNode) !*QNode {
-            const new = try self.node_buf.allocator.create(QNode);
-            new.* = node;
-            self.q.insertAfter(after, new);
-            return new;
-        }
-
-        fn queue_left(self: *Self, node: QNode) !*QNode {
-            const new = try self.node_buf.allocator.create(QNode);
-            new.* = node;
-            self.q.prepend(new);
-            return new;
+            return item;
         }
     };
 }
