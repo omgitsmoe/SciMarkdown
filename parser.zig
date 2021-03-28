@@ -112,6 +112,17 @@ pub const Parser = struct {
         return self.open_blocks[self.open_block_idx];
     }
 
+    inline fn get_last_container_block(self: *Parser) *Node {
+        var i: u8 = self.open_block_idx;
+        while (i > 0) : (i -= 1) {
+            if (self.open_blocks[i].is_container_block()) {
+                return self.open_blocks[i];
+            }
+        }
+        // return current_document which is open_blocks[0]
+        return self.current_document;
+    }
+
     inline fn close_last_block(self: *Parser) void {
         std.debug.assert(self.open_block_idx > 0);
         self.open_block_idx -= 1;
@@ -189,6 +200,26 @@ pub const Parser = struct {
 
                 self.eat_token();
             },
+            TokenKind.Decrease_indent => {
+                std.debug.print("ln:{}: Decrease_indent: block {}\n", .{ self.peek_token().line_nr, self.get_last_block().data });
+                switch (self.get_last_block().data) {
+                    NodeKind.UnorderedListItem, NodeKind.OrderedListItem => {
+                        self.close_last_block();
+                        self.close_last_block();
+                    },
+                    else => self.close_last_block(),
+                }
+                self.eat_token();
+            },
+            TokenKind.Increase_indent => {
+                std.debug.print("ln:{}: Increase_indent: block {}\n", .{ self.peek_token().line_nr, self.get_last_block().data });
+                // TODO only for now so we don't infinite loop
+                switch (self.get_last_block().data) {
+                    NodeKind.UnorderedListItem, NodeKind.OrderedListItem => {},
+                    else => {},
+                }
+                self.eat_token();
+            },
 
             TokenKind.Hash => {
                 // atx heading
@@ -246,7 +277,12 @@ pub const Parser = struct {
                 std.debug.print("Start {} Next {} 3rd {}\n",
                     .{ start_token_kind, next_token.token_kind, self.peek_next_token().token_kind });
                 if (next_token.token_kind == TokenKind.Space) {
-                    // TODO unordered list (can be started while in a container block)
+                    // unordered list (can be started while in a container block)
+
+                    try self.require_token(TokenKind.Space, " after list item starter!");
+                    self.eat_token();
+
+                    try self.parse_unordered_list(start_token_kind);
                 } else if (start_token_kind == TokenKind.Dash and
                            next_token.token_kind == TokenKind.Dash and
                            self.peek_next_token().token_kind == TokenKind.Dash) {
@@ -300,7 +336,6 @@ pub const Parser = struct {
             TokenKind.Digits => {
                 // maybe ordered list
                 // 1-9 digits (0-9) ending in a '.' or ')'
-                // TODO can't be in a paragraph
                 self.eat_token();
                 const next_token_kind = self.peek_token().token_kind;
                 if (next_token_kind == TokenKind.Period or
@@ -309,26 +344,9 @@ pub const Parser = struct {
 
                     try self.require_token(TokenKind.Space, " after list item starter!");
                     self.eat_token();
-
-                    var list_node = try self.new_node(self.get_last_block());
-                    list_node.data = .OrderedList;
-                    // TODO can only be opened inside another container block
-                    self.open_block(list_node);
-
-                    // TODO parse_list_item; move this into it v
-                    // limit doesn't make sense, since number isn't used for numbering the
-                    // ordered list; even though this should belong into the list item parse fn
-                    // if (current_token.len() > 9) {
-                    //     std.debug.print(
-                    //         "CommonMark ordered list items only allow 9 digits!", .{});
-                    //     return ParseError.ExceededOrderedListDigits;
-                    // }
-                    // const item_text = try self.require_token(TokenKind.Text
-                    // var list_item = try self.new_node();
-                    // list_item.data = .OrderedListItem;
-                    // list_node.append_child(list_item);
+                    try self.parse_ordered_list(next_token_kind);
                 } else {
-                    // TODO parse_paragraph
+                    try self.parse_paragraph();
                 }
             },
 
@@ -366,7 +384,7 @@ pub const Parser = struct {
                 if (self.open_block_idx > 0) {
                     Parser.report_error(
                         "ln:{}: References must be defined at the document level!\n",
-                        .{ self.peek_token() });
+                        .{ self.peek_token().line_nr });
                     return ParseError.SyntaxError;
                 }
                 self.eat_token();
@@ -441,23 +459,92 @@ pub const Parser = struct {
         }
     }
 
+    fn parse_ordered_list(self: *Parser, item_kind: TokenKind) ParseError!void {
+        // TODO use start number
+        const last_block_data: NodeKind = self.get_last_block().data;
+        if (last_block_data == NodeKind.OrderedListItem and
+                last_block_data.OrderedListItem.list_item_starter == item_kind) {
+            self.close_last_block();
+
+            var list_item_node = try self.new_node(self.get_last_block());
+            list_item_node.data = .{
+                .OrderedListItem = .{ .list_item_starter = item_kind },
+            };
+            self.open_block(list_item_node);
+        } else {
+            if (last_block_data == NodeKind.OrderedListItem) {
+                // also ordered list but different list_item_starter which results
+                // in a new list
+                self.close_last_block();
+                self.close_last_block();
+            }
+            var list_node = try self.new_node(self.get_last_block());
+            list_node.data = .{
+                .OrderedList = .{ .list_item_starter = item_kind },
+            };
+            // TODO can only be opened inside another container block
+            self.open_block(list_node);
+
+            var list_item_node = try self.new_node(list_node);
+            list_item_node.data = .{
+                .OrderedListItem = .{ .list_item_starter = item_kind },
+            };
+            self.open_block(list_item_node);
+        }
+    }
+
+    fn parse_unordered_list(self: *Parser, item_kind: TokenKind) ParseError!void {
+        // TODO figure out a good way (alternative to vanilla md) of how to determine
+        // if list should be loose or not
+        // if one blank line is present in the contents of any of the list items
+        // the list will be loose
+
+        const last_block_data = self.get_last_block().data;
+        if (last_block_data == NodeKind.UnorderedListItem and
+                last_block_data.UnorderedListItem.list_item_starter == item_kind) {
+            self.close_last_block();
+
+            var list_node_item = try self.new_node(self.get_last_block());
+            list_node_item.data = .{
+                .UnorderedListItem = .{ .list_item_starter = item_kind },
+            };
+            self.open_block(list_node_item);
+        } else {
+            // new list without any previous or start new list due to different
+            // list item starters (- vs +)
+            var list_node = try self.new_node(self.get_last_container_block());
+            list_node.data = .{
+                .UnorderedList = .{ .list_item_starter = item_kind },
+            };
+            self.open_block(list_node);
+
+            var list_node_item = try self.new_node(list_node);
+            list_node_item.data = .{
+                .UnorderedListItem = .{ .list_item_starter = item_kind },
+            };
+            self.open_block(list_node_item);
+        }
+
+        try self.parse_block();
+    }
+
     fn parse_paragraph(self: *Parser) ParseError!void {
         var paragraph = try self.new_node(self.get_last_block());
         paragraph.data = NodeKind.Paragraph;
         self.open_block(paragraph);
-        while (true) {
+        while (try self.parse_inline(false)) {
             if(self.peek_token().token_kind == TokenKind.Newline) {
                 self.eat_token();
                 if (self.peek_token().token_kind == TokenKind.Newline) {
                     break;
                 }
-            } else if (self.peek_token().token_kind == TokenKind.Eof) {
-                // TODO @Hack
-                self.close_last_block();
-                return;
             }
-            try self.parse_inline();
             // std.debug.print("Tok: {} NExt {}\n", .{ self.peek_token().token_kind, self.peek_next_token().token_kind });
+        }
+        if (self.peek_token().token_kind == TokenKind.Eof) {
+            // TODO @Hack
+            self.close_last_block();
+            return;
         }
         self.eat_token();  // eat 2nd \n
 
@@ -475,25 +562,27 @@ pub const Parser = struct {
 
     /// eats the token_kind token; EOF is not consumed
     fn parse_inline_until(self: *Parser, token_kind: TokenKind) ParseError!void {
-        while (true) {
+        while (try self.parse_inline(false)) {
             if(self.peek_token().token_kind == token_kind) {
                 self.eat_token();
                 return;
-            } else if (self.peek_token().token_kind == TokenKind.Eof) {
-                return;
             }
-            try self.parse_inline();
         }
     }
 
-    fn parse_inline(self: *Parser) ParseError!void {
+    /// returns bool determinin whether inline parsing should continue
+    fn parse_inline(self: *Parser, comptime end_on_newline: bool) ParseError!bool {
         const token = self.peek_token();
         switch (token.token_kind) {
-            TokenKind.Newline, TokenKind.Eof => return,
-            TokenKind.Decrease_indent, TokenKind.Increase_indent => {
-                // TODO only for now so we don't infinite loop
-                self.eat_token();
+            TokenKind.Newline => {
+                if (end_on_newline) {
+                    return false;
+                } else {
+                    self.eat_token();
+                    return true;
+                }
             },
+            TokenKind.Eof, TokenKind.Increase_indent, TokenKind.Decrease_indent => return false,
             TokenKind.Comment => self.eat_token(),
             TokenKind.Hard_line_break => {
                 self.eat_token();
@@ -612,8 +701,8 @@ pub const Parser = struct {
                     continue_text.data.Text.text.len += token.end - token.start;
                     // const tok_text = if (token.token_kind != TokenKind.Decrease_indent) token.text(self.tokenizer.bytes) else token.token_kind.name();
                     // std.debug.print("Tok kind {} text: {}\n", .{ token.token_kind,  tok_text });
-                    std.debug.print("ln:{}: Enlarged text node: {}\n",
-                        .{ token.line_nr, continue_text.data.Text.text });
+                    // std.debug.print("ln:{}: Enlarged text node: {}\n",
+                    //     .{ token.line_nr, continue_text.data.Text.text });
                 } else {
                     const parent = self.get_last_block();
                     var text_node = try self.new_node(parent);
@@ -622,7 +711,7 @@ pub const Parser = struct {
                     };
                     self.last_text_node = text_node;
 
-                    std.debug.print("Text node content: '''{}'''\n", .{ text_node.data.Text.text });
+                    // std.debug.print("Text node content: '''{}'''\n", .{ text_node.data.Text.text });
                 }
                 self.eat_token();
 
@@ -639,6 +728,7 @@ pub const Parser = struct {
                 }
             },
         }
+        return true;
     }
 
     fn parse_link(self: *Parser) ParseError!void {
@@ -651,36 +741,29 @@ pub const Parser = struct {
         };
         self.open_block(link_node);
 
-        var token = self.peek_token();
-        const link_text_start_token = token;
-        while (true) {
-            switch (token.token_kind) {
-                TokenKind.Close_bracket => {
-                    const last_block = self.get_last_block();
-                    if (last_block.data != NodeKind.Link) {
-                        Parser.report_error(
-                            "ln:{}: Unclosed {} in Link text (first [] of a link definition)\n",
-                            .{ self.peek_token().line_nr, @tagName(last_block.data) });
-                        return ParseError.SyntaxError;
-                    }
-                    self.eat_token();
-                    break;
-                },
-                TokenKind.Newline => self.eat_token(),
-                TokenKind.Eof => {
+        const link_text_start_token = self.peek_token();
+        while (try self.parse_inline(false)) {
+            if (self.peek_token().token_kind == TokenKind.Close_bracket) {
+                const last_block = self.get_last_block();
+                if (last_block.data != NodeKind.Link) {
                     Parser.report_error(
-                        "ln:{}: Encountered end of file inside link text\n",
-                        .{ self.peek_token().line_nr });
+                        "ln:{}: Unclosed {} in Link text (first [] of a link definition)\n",
+                        .{ self.peek_token().line_nr, @tagName(last_block.data) });
                     return ParseError.SyntaxError;
-                },
-                else => try self.parse_inline(),
+                }
+                self.eat_token();
+                break;
             }
-
-            token = self.peek_token();
         }
-        const link_text_end = token.start;
+        if (self.peek_token().token_kind == TokenKind.Eof) {
+            Parser.report_error(
+                "ln:{}: Encountered end of file inside link text\n",
+                .{ link_text_start_token.line_nr });
+            return ParseError.SyntaxError;
+        }
+        const link_text_end = self.peek_token().start;
 
-        token = self.peek_token();
+        var token = self.peek_token();
         if (token.token_kind == TokenKind.Open_bracket) {
             // start of link label referring to a reference definition
             self.eat_token();

@@ -71,13 +71,17 @@ This is a normal paragraph %% and this is a comment
 ## Lists
 
 1. First ordered list item
+   multi-line [link
+   text wrap](https://google.com)
+   but this will still be rendered on one line
 2. Another item
-  - Unordered sub-list. 
-  :[ref]: (test)
+    - Unordered sub-list.
+    :[ref]: (test)
 1. Actual numbers don't matter, just that it's a number
-  1. Ordered sub-list
+    1. Ordered sub-list
 4. And another item.
 
+   %% blank line above will make this a loose list -> every list item starts a paragraph
    You can have properly indented paragraphs within list items. Notice the blank line above, and the leading spaces (at least one, but we'll use three here to also align the raw Markdown).
 
    To have a line break without a paragraph, you will need to use two trailing spaces.  
@@ -90,8 +94,8 @@ This is a normal paragraph %% and this is a comment
 + Or pluses
 
 - No indent
-  - First indent
-    - Second indent
+    - First indent
+        - Second indent
 - Dropping two indents
 
 

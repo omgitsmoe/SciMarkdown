@@ -38,7 +38,6 @@ pub const HTMLGenerator = struct {
             switch (node_info.data.data) {
                 .Document => continue,
                 .Undefined, .Import => unreachable,
-                .UnorderedList, .UnorderedListItem, .OrderedList, .OrderedListItem => continue,
                 // blocks like thematic break should never get both a start and end NodeInfo
                 // since they can't contain other blocks
                 .ThematicBreak => try self.html_buf.appendSlice("<hr/>\n"),
@@ -51,6 +50,27 @@ pub const HTMLGenerator = struct {
                         try self.html_buf.append('<');
                     }
                     try self.html_buf.appendSlice(&hbuf);
+                },
+                .UnorderedList => {
+                    if (!node_info.is_end) {
+                        try self.html_buf.appendSlice("<ul>\n");
+                    } else {
+                        try self.html_buf.appendSlice("</ul>\n");
+                    }
+                },
+                .OrderedList => {
+                    if (!node_info.is_end) {
+                        try self.html_buf.appendSlice("<ol>\n");
+                    } else {
+                        try self.html_buf.appendSlice("</ol>\n");
+                    }
+                },
+                .UnorderedListItem, .OrderedListItem => {
+                    if (!node_info.is_end) {
+                        try self.html_buf.appendSlice("<li>\n");
+                    } else {
+                        try self.html_buf.appendSlice("</li>\n");
+                    }
                 },
                 .FencedCode => |code| {
                     try self.html_buf.appendSlice("<pre><code>\n");

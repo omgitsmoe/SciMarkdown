@@ -1,7 +1,7 @@
 const std = @import("std");
 
-pub const TAB_TO_SPACES = 2;
-pub const SPACES_PER_INDENT = 2;
+pub const TAB_TO_SPACES = 4;
+pub const SPACES_PER_INDENT = 4;
 
 pub const TokenKind = enum {
     Invalid,

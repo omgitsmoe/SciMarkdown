@@ -18,6 +18,7 @@ pub const Node = struct {
 
     const LinkData = struct { label: ?[]const u8, url: ?[]const u8, title: ?[]const u8 };
     const EmphData = struct { opener_token_kind: TokenKind };
+    const UnorderedListData = struct { list_item_starter: TokenKind };
     // tagged union
     const NodeData = union(enum) {
         // special
@@ -43,11 +44,11 @@ pub const Node = struct {
         // container blocks
         BlockQuote,
 
-        UnorderedList,
-        UnorderedListItem,
+        UnorderedList: UnorderedListData,
+        UnorderedListItem: UnorderedListData,
 
-        OrderedList,
-        OrderedListItem,
+        OrderedList: UnorderedListData,
+        OrderedListItem: UnorderedListData,
         
         // ?
         Table,
@@ -94,7 +95,7 @@ pub const Node = struct {
 
     pub inline fn is_container_block(self: *Node) bool {
         return switch (self.data) {
-            .BlockQuote, .BulletList, .BulletListItem, .OrderedList, .OrderedListItem => true,
+            .BlockQuote, .UnorderedList, .UnorderedListItem, .OrderedList, .OrderedListItem => true,
             else => false,
         };
     }
