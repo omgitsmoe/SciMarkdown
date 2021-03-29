@@ -156,13 +156,12 @@ pub const Tokenizer = struct {
     current_byte: ?u8,
 
     line_count: u32,
-    indent_spaces: i16,
-    indent_status: IndentStatus = .SameIndent,
+    indent_idx: u8,
+    new_indent_idx: u8,
+    indent_stack: [50]i16,
 
-    pub const IndentStatus = enum {
-        SameIndent,
-        Increase_indent,
-        Decrease_indent,
+    pub const Error = error {
+        UnmachtingDedent,
     };
 
     pub fn init(allocator: *std.mem.Allocator, filename: []const u8) !Tokenizer {
@@ -189,8 +188,11 @@ pub const Tokenizer = struct {
             .index = 0,
             .current_byte = contents[0],
             .line_count = 1,
-            .indent_spaces = 0,
+            .indent_idx = 0,
+            .new_indent_idx = 0,
+            .indent_stack = undefined,
         };
+        tokenizer.indent_stack[0] = 0;
 
         return tokenizer;
     }
@@ -233,7 +235,11 @@ pub const Tokenizer = struct {
         }
     }
 
-    pub fn get_token(self: *Tokenizer) Token {
+    inline fn report_error(comptime err_msg: []const u8, args: anytype) void {
+        std.log.err(err_msg, args);
+    }
+
+    pub fn get_token(self: *Tokenizer) Error!Token {
         var tok = Token{
             .token_kind = TokenKind.Invalid,
             .start = self.index,
@@ -243,21 +249,14 @@ pub const Tokenizer = struct {
 
         // we already advanced to the first non-whitespace byte but we still
         // need to emit indentation change tokens
-        // NOTE: just emit one token per indentation change, so we don't lock ourselves
-        // to a multiple of X spaces or whatever, it only matters if the amount of spaces
-        // changed (beyond a threshold of >1 spaces only when INCREASING indent)
-        switch (self.indent_status) {
-            IndentStatus.Increase_indent => {
-                tok.token_kind = TokenKind.Increase_indent;
-                self.indent_status = IndentStatus.SameIndent;
-                return tok;
-            },
-            IndentStatus.Decrease_indent => {
-                tok.token_kind = TokenKind.Decrease_indent;
-                self.indent_status = IndentStatus.SameIndent;
-                return tok;
-            },
-            else => {},
+        if (self.indent_idx < self.new_indent_idx) {
+            tok.token_kind = TokenKind.Increase_indent;
+            self.indent_idx += 1;
+            return tok;
+        } else if (self.indent_idx > self.new_indent_idx) {
+            tok.token_kind = TokenKind.Decrease_indent;
+            self.indent_idx -= 1;
+            return tok;
         }
 
         if (self.current_byte) |char| {
@@ -291,20 +290,40 @@ pub const Tokenizer = struct {
 
                     if (self.peek_next_byte()) |next_byte| {
                         if (next_byte != @as(u8, '\n') and next_byte != @as(u8, '\r')) {
+                            // TODO @CleanUp should this be part of the parser?
                             // only change indent_status if it's not a blank line
                             //
                             // dont emit any token for change in indentation level here since we first
                             // need the newline token
                             // check if amount of spaces changed changed
-                            // (beyond a threshold of >1 spaces only when INCREASING indent)
-                            // TODO keep this ^?
-                            const indent_delta: i16 = indent_spaces - self.indent_spaces;
+                            // TODO keep this v?
+                            // (beyond a threshold of >3 spaces only when INCREASING indent so
+                            //  we don't get .Increase_indent when going from list item starter to the
+                            //  next line:
+                            //  1. starter
+                            //     continue
+                            //    ^ 3rd space
+                            //  but this still triggers:
+                            //  1. starter
+                            //     - sublist
+                            std.debug.print("Indentidx: {}\n", .{self.indent_idx});
+                            const indent_delta: i16 = indent_spaces - self.indent_stack[self.indent_idx];
                             if (indent_delta > 1) {
-                                self.indent_status = .Increase_indent;
+                                self.new_indent_idx = self.indent_idx + 1;
+                                self.indent_stack[self.new_indent_idx] = indent_spaces;
                             } else if (indent_delta < 0) {
-                                self.indent_status = .Decrease_indent;
+                                var new_indent_idx = self.indent_idx;
+                                while (self.indent_stack[new_indent_idx] != indent_spaces) : (
+                                    new_indent_idx -= 1) {
+                                    if (new_indent_idx == 0) {
+                                        Tokenizer.report_error(
+                                            "ln:{}: No indentation level matches the last indent!\n",
+                                            .{ self.line_count });  // not tok.line_nr since its the next line
+                                        return Error.UnmachtingDedent;
+                                    }
+                                }
+                                self.new_indent_idx = new_indent_idx;
                             }
-                            self.indent_spaces = indent_spaces;
                         }
                     }
 

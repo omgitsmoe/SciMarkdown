@@ -31,6 +31,13 @@ pub const Parser = struct {
     open_blocks: [50]*Node,
     open_block_idx: u8,
 
+    state: ParserState = .Default,
+
+    pub const ParserState = enum {
+        Default,
+        Increase_indent_inside_list,
+    };
+
     // each error name across the entire compilation gets assigned an unsigned
     // integer greater than 0. You are allowed to declare the same error name
     // more than once, and if you do, it gets assigned the same integer value
@@ -70,7 +77,7 @@ pub const Parser = struct {
         };
 
         // manually get the first token
-        try parser.token_buf.append(parser.tokenizer.get_token());
+        try parser.token_buf.append(try parser.tokenizer.get_token());
 
         // create() returns ptr to undefined memory
         var current_document = try Node.create(allocator);
@@ -136,7 +143,7 @@ pub const Parser = struct {
         var token: Token = undefined;
         token.token_kind = TokenKind.Invalid;
         while (token.token_kind != TokenKind.Eof) {
-            token = self.tokenizer.get_token();
+            token = self.tokenizer.get_token() catch return ParseError.SyntaxError;
             try self.token_buf.append(token);
         }
 
@@ -199,8 +206,24 @@ pub const Parser = struct {
                 //
                 // self.current_document is always open_blocks[0]
                 // container blocks can contain blank lines so we don't close them here
-                if (self.open_block_idx > 0 and !self.get_last_block().is_container_block()) {
-                    std.debug.print("Close block ln {}\n", .{ self.peek_token().line_nr });
+                if (self.open_block_idx > 0 and
+                        self.peek_next_token().token_kind == TokenKind.Newline) {
+                    std.debug.print("ln:{}: Close block (all): {}\n",
+                        .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
+                    switch (self.get_last_block().data) {
+                        NodeKind.OrderedListItem, NodeKind.UnorderedListItem => {
+                            self.close_last_block();
+                            self.close_last_block();
+                        },
+                        else => {
+                            self.close_last_block();
+                        }
+                    }
+                    self.eat_token();  // eat both \n
+                } else if (self.open_block_idx > 0 and
+                           !self.get_last_block().is_container_block()) {
+                    std.debug.print("ln:{}: Close block: {}\n",
+                        .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
                     self.close_last_block();
                 }
 
@@ -219,11 +242,34 @@ pub const Parser = struct {
             },
             TokenKind.Increase_indent => {
                 std.debug.print("ln:{}: Increase_indent: block {}\n", .{ self.peek_token().line_nr, self.get_last_block().data });
-                // TODO only for now so we don't infinite loop
-                switch (self.get_last_block().data) {
-                    NodeKind.UnorderedListItem, NodeKind.OrderedListItem => {},
-                    else => {},
-                }
+                // only set Increase_indent_inside_list if the next token
+                // can start a list
+                // otherwise
+                // 1. first line
+                //    indented to first line's text
+                // ^ this will trigger an Increase_indent and will result in a new list
+                // but this should only happen on e.g.:
+                // 1. first line
+                //    - indented to first line's text
+                // switch (self.peek_next_token().token_kind) {
+                //     TokenKind.Dash, TokenKind.Plus, TokenKind.Digits => {
+                //         switch (self.get_last_block().data) {
+                //             NodeKind.UnorderedListItem, NodeKind.OrderedListItem => {
+                //                 std.debug.print("    Set Increase_indent_inside_list!\n", .{});
+                //                 self.state = .Increase_indent_inside_list;
+                //             },
+                //             else => {},
+                //         }
+                //     },
+                //     else => {},
+                // }
+                        switch (self.get_last_block().data) {
+                            NodeKind.UnorderedListItem, NodeKind.OrderedListItem => {
+                                std.debug.print("    Set Increase_indent_inside_list!\n", .{});
+                                self.state = .Increase_indent_inside_list;
+                            },
+                            else => {},
+                        }
                 self.eat_token();
             },
 
@@ -467,7 +513,9 @@ pub const Parser = struct {
     fn parse_ordered_list(self: *Parser, item_kind: TokenKind) ParseError!void {
         // TODO use start number
         const last_block_data = self.get_last_block().data;
-        if (last_block_data == NodeKind.OrderedListItem and
+        // make sure we create a new list on increased indent even if starters match
+        if (self.state != .Increase_indent_inside_list and
+                last_block_data == NodeKind.OrderedListItem and
                 last_block_data.OrderedListItem.list_item_starter == item_kind) {
             self.close_last_block();
 
@@ -477,7 +525,9 @@ pub const Parser = struct {
             };
             self.open_block(list_item_node);
         } else {
-            if (last_block_data == NodeKind.OrderedListItem) {
+            // TODO @CleanUp combine ifs
+            if (self.state != .Increase_indent_inside_list and
+                    last_block_data == NodeKind.OrderedListItem) {
                 // also ordered list but different list_item_starter which results
                 // in a new list
                 self.close_last_block();
@@ -505,7 +555,8 @@ pub const Parser = struct {
         // the list will be loose
 
         const last_block_data = self.get_last_block().data;
-        if (last_block_data == NodeKind.UnorderedListItem and
+        if (self.state != .Increase_indent_inside_list and
+                last_block_data == NodeKind.UnorderedListItem and
                 last_block_data.UnorderedListItem.list_item_starter == item_kind) {
             self.close_last_block();
 
@@ -517,6 +568,14 @@ pub const Parser = struct {
         } else {
             // new list without any previous or start new list due to different
             // list item starters (- vs +)
+            // TODO @CleanUp combine ifs
+            if (self.state != .Increase_indent_inside_list and
+                    last_block_data == NodeKind.UnorderedListItem) {
+                // also unordered list but different list_item_starter which results
+                // in a new list
+                self.close_last_block();
+                self.close_last_block();
+            }
             var list_node = try self.new_node(self.get_last_container_block());
             list_node.data = .{
                 .UnorderedList = .{ .list_item_starter = item_kind },
