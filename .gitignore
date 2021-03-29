@@ -2,3 +2,7 @@
 *.pdf
 *.zip
 zig-cache/
+research/
+*.exe
+*.pdb
+.vs/

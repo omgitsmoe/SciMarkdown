@@ -104,6 +104,13 @@ pub const TokenKind = enum {
             .Eof => "(EOF)",
         };
     }
+
+    pub inline fn ends_line(self: TokenKind) bool {
+        return switch (self) {
+            .Eof, .Newline => true,
+            else => false,
+        };
+    }
 };
 
 pub const Token = struct {
@@ -149,9 +156,14 @@ pub const Tokenizer = struct {
     current_byte: ?u8,
 
     line_count: u32,
-    last_line_end_idx: u32,
-    indent_lvl: u8,
-    new_indent_lvl: u8,
+    indent_spaces: i16,
+    indent_status: IndentStatus = .SameIndent,
+
+    pub const IndentStatus = enum {
+        SameIndent,
+        Increase_indent,
+        Decrease_indent,
+    };
 
     pub fn init(allocator: *std.mem.Allocator, filename: []const u8) !Tokenizer {
         // TODO skip BOM if present
@@ -177,9 +189,7 @@ pub const Tokenizer = struct {
             .index = 0,
             .current_byte = contents[0],
             .line_count = 1,
-            .last_line_end_idx = 0,
-            .indent_lvl = 0,
-            .new_indent_lvl = 0,
+            .indent_spaces = 0,
         };
 
         return tokenizer;
@@ -233,14 +243,21 @@ pub const Tokenizer = struct {
 
         // we already advanced to the first non-whitespace byte but we still
         // need to emit indentation change tokens
-        if (self.indent_lvl < self.new_indent_lvl) {
-            self.indent_lvl += 1;
-            tok.token_kind = TokenKind.Increase_indent;
-            return tok;
-        } else if (self.indent_lvl > self.new_indent_lvl) {
-            self.indent_lvl -= 1;
-            tok.token_kind = TokenKind.Decrease_indent;
-            return tok;
+        // NOTE: just emit one token per indentation change, so we don't lock ourselves
+        // to a multiple of X spaces or whatever, it only matters if the amount of spaces
+        // changed (beyond a threshold of >1 spaces only when INCREASING indent)
+        switch (self.indent_status) {
+            IndentStatus.Increase_indent => {
+                tok.token_kind = TokenKind.Increase_indent;
+                self.indent_status = IndentStatus.SameIndent;
+                return tok;
+            },
+            IndentStatus.Decrease_indent => {
+                tok.token_kind = TokenKind.Decrease_indent;
+                self.indent_status = IndentStatus.SameIndent;
+                return tok;
+            },
+            else => {},
         }
 
         if (self.current_byte) |char| {
@@ -261,11 +278,9 @@ pub const Tokenizer = struct {
                 '\n' => blk: {
                     // since line/col info is only needed on error we only store the
                     // line number and compute the col on demand
-                    // TODO delete last_line_end_idx
-                    self.last_line_end_idx = self.index;
                     self.line_count += 1;
 
-                    var indent_spaces: i32 = 0;
+                    var indent_spaces: i16 = 0;
                     while (self.peek_next_byte()) |next_byte| : (self.prechecked_advance_to_next_byte()) {
                         switch (next_byte) {
                             ' ' => indent_spaces += 1,
@@ -274,13 +289,23 @@ pub const Tokenizer = struct {
                         }
                     }
 
-                    // dont emit any token for change in indentation level here since we first
-                    // need the newline token
-                    const new_indent_lvl: u8 = @intCast(u8, @divTrunc(indent_spaces, SPACES_PER_INDENT)); 
-                    if (new_indent_lvl > self.indent_lvl) {
-                        self.new_indent_lvl = new_indent_lvl;
-                    } else if (new_indent_lvl < self.indent_lvl) {
-                        self.new_indent_lvl = new_indent_lvl;
+                    if (self.peek_next_byte()) |next_byte| {
+                        if (next_byte != @as(u8, '\n') and next_byte != @as(u8, '\r')) {
+                            // only change indent_status if it's not a blank line
+                            //
+                            // dont emit any token for change in indentation level here since we first
+                            // need the newline token
+                            // check if amount of spaces changed changed
+                            // (beyond a threshold of >1 spaces only when INCREASING indent)
+                            // TODO keep this ^?
+                            const indent_delta: i16 = indent_spaces - self.indent_spaces;
+                            if (indent_delta > 1) {
+                                self.indent_status = .Increase_indent;
+                            } else if (indent_delta < 0) {
+                                self.indent_status = .Decrease_indent;
+                            }
+                            self.indent_spaces = indent_spaces;
+                        }
                     }
 
                     break :blk TokenKind.Newline;

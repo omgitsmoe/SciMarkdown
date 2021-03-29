@@ -192,8 +192,14 @@ pub const Parser = struct {
                 // blank lines are ignored
                 // two \n (blank line) end a paragraph
 
+                // TODO maybe switch to always parsing till end of line including paragraphs
+                // (not inline content that must continue e.g. in the middle of [..\n...](url))
+                // we would just stop on Newline and call parse_block again and continue adding to
+                // the previous paragraph it we'd open one again
+                //
                 // self.current_document is always open_blocks[0]
-                if (self.open_block_idx > 0) {
+                // container blocks can contain blank lines so we don't close them here
+                if (self.open_block_idx > 0 and !self.get_last_block().is_container_block()) {
                     std.debug.print("Close block ln {}\n", .{ self.peek_token().line_nr });
                     self.close_last_block();
                 }
@@ -246,8 +252,7 @@ pub const Parser = struct {
                     self.eat_token();  // eat space
 
                     // TODO make sure we account for sudden Eof everywhere
-                    if (self.peek_token().token_kind == TokenKind.Newline or
-                            self. peek_token().token_kind == TokenKind.Eof) {
+                    if (self.peek_token().token_kind.ends_line()) {
                         Parser.report_error("ln:{}: Empty heading name!", .{ self.peek_token().line_nr });
                         return ParseError.SyntaxError;
                     }
@@ -301,7 +306,7 @@ pub const Parser = struct {
                     // CommonMark allows optional spaces after a thematic break - we don't!
                     // so the line the thematic break is in has to end in a newline right
                     // after the thematic break (---)
-                    if (self.peek_token().token_kind != TokenKind.Newline) {
+                    if (!self.peek_token().token_kind.ends_line()) {
                         // \\ starts a zig multiline string-literal that goes until the end
                         // of the line, \n is only added if the next line starts with a \\
                         // alternatively you could use ++ at the end of the line to concat
@@ -383,8 +388,9 @@ pub const Parser = struct {
                 // link reference definition
                 if (self.open_block_idx > 0) {
                     Parser.report_error(
-                        "ln:{}: References must be defined at the document level!\n",
-                        .{ self.peek_token().line_nr });
+                        "ln:{}: References must be defined at the document level! " ++
+                        "Definition found in '{}' instead.\n",
+                        .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
                     return ParseError.SyntaxError;
                 }
                 self.eat_token();
@@ -394,8 +400,7 @@ pub const Parser = struct {
                 // CommonMark allows one \n inside a reference label
                 // don't allow any for now!
                 while (token.token_kind != TokenKind.Close_bracket_colon and
-                        token.token_kind != TokenKind.Newline and
-                        token.token_kind != TokenKind.Eof) {
+                        !token.token_kind.ends_line()) {
                     self.eat_token();
                     token = self.peek_token();
                 }
@@ -461,7 +466,7 @@ pub const Parser = struct {
 
     fn parse_ordered_list(self: *Parser, item_kind: TokenKind) ParseError!void {
         // TODO use start number
-        const last_block_data: NodeKind = self.get_last_block().data;
+        const last_block_data = self.get_last_block().data;
         if (last_block_data == NodeKind.OrderedListItem and
                 last_block_data.OrderedListItem.list_item_starter == item_kind) {
             self.close_last_block();
@@ -532,22 +537,16 @@ pub const Parser = struct {
         var paragraph = try self.new_node(self.get_last_block());
         paragraph.data = NodeKind.Paragraph;
         self.open_block(paragraph);
-        while (try self.parse_inline(false)) {
-            if(self.peek_token().token_kind == TokenKind.Newline) {
+        while (try self.parse_inline(false)) { 
+            if (self.peek_token().token_kind == TokenKind.Newline) {
                 self.eat_token();
                 if (self.peek_token().token_kind == TokenKind.Newline) {
+                    // don't eat Newline token of empty line
+                    // since need that to potentially close other blocks in parse_block
                     break;
                 }
             }
-            // std.debug.print("Tok: {} NExt {}\n", .{ self.peek_token().token_kind, self.peek_next_token().token_kind });
         }
-        if (self.peek_token().token_kind == TokenKind.Eof) {
-            // TODO @Hack
-            self.close_last_block();
-            return;
-        }
-        self.eat_token();  // eat 2nd \n
-
         // std.debug.print("ended on ln:{}: Last block: {}\n",
         //     .{ self.peek_token().line_nr ,self.get_last_block().data });
 
@@ -570,7 +569,7 @@ pub const Parser = struct {
         }
     }
 
-    /// returns bool determinin whether inline parsing should continue
+    /// returns bool determining whether inline parsing should continue
     fn parse_inline(self: *Parser, comptime end_on_newline: bool) ParseError!bool {
         const token = self.peek_token();
         switch (token.token_kind) {
@@ -798,11 +797,11 @@ pub const Parser = struct {
     }
 
     fn parse_code_block(self: *Parser) ParseError!void {
-        const starting_lvl = self.tokenizer.indent_lvl;
         // ArrayList doesn't accept ArenaAllocator directly so we need to
         // pass string_arena.allocator which is the proper mem.Allocator
         var string_buf = std.ArrayList(u8).init(&self.string_arena.allocator);
-        var current_indent_lvl: u8 = 0;
+        var current_indent_lvl: u16 = 0;
+        // TODO switch this to using spaces instead of "levels"?
         const indent = " " ** tokenizer.SPACES_PER_INDENT;
         var current_token: *Token = self.peek_token();
         var line_start = false;
