@@ -18,7 +18,7 @@ pub const Node = struct {
 
     const LinkData = struct { label: ?[]const u8, url: ?[]const u8, title: ?[]const u8 };
     const EmphData = struct { opener_token_kind: TokenKind };
-    const UnorderedListData = struct { list_item_starter: TokenKind };
+    const ListItemData = struct { list_item_starter: TokenKind, indent: u16 };
     // tagged union
     const NodeData = union(enum) {
         // special
@@ -44,11 +44,11 @@ pub const Node = struct {
         // container blocks
         BlockQuote,
 
-        UnorderedList: UnorderedListData,
-        UnorderedListItem: UnorderedListData,
+        UnorderedList,
+        UnorderedListItem: ListItemData,
 
-        OrderedList: UnorderedListData,
-        OrderedListItem: UnorderedListData,
+        OrderedList,
+        OrderedListItem: ListItemData,
         
         // ?
         Table,

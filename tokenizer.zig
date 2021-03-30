@@ -118,6 +118,7 @@ pub const Token = struct {
     start: u32,
     // exclusive end offset so we can use start..end when slicing
     end: u32,
+    column: u16,
     line_nr: u32,
 
     pub inline fn len(self: *const Token) u32 {
@@ -156,6 +157,7 @@ pub const Tokenizer = struct {
     current_byte: ?u8,
 
     line_count: u32,
+    last_line_end_idx: u32,
     indent_idx: u8,
     new_indent_idx: u8,
     indent_stack: [50]i16,
@@ -188,6 +190,7 @@ pub const Tokenizer = struct {
             .index = 0,
             .current_byte = contents[0],
             .line_count = 1,
+            .last_line_end_idx = 0,
             .indent_idx = 0,
             .new_indent_idx = 0,
             .indent_stack = undefined,
@@ -244,6 +247,7 @@ pub const Tokenizer = struct {
             .token_kind = TokenKind.Invalid,
             .start = self.index,
             .end = self.index + 1,
+            .column = @intCast(u16, self.index - self.last_line_end_idx),
             .line_nr = self.line_count, 
         };
 
@@ -251,11 +255,20 @@ pub const Tokenizer = struct {
         // need to emit indentation change tokens
         if (self.indent_idx < self.new_indent_idx) {
             tok.token_kind = TokenKind.Increase_indent;
+            const ind_delta = self.indent_stack[self.indent_idx + 1] - self.indent_stack[self.indent_idx];
             self.indent_idx += 1;
+            tok.column = @intCast(u16, self.indent_stack[self.indent_idx]);
+            tok.start = self.last_line_end_idx + tok.column;
+            tok.end = tok.start + @intCast(u16, ind_delta);
             return tok;
         } else if (self.indent_idx > self.new_indent_idx) {
             tok.token_kind = TokenKind.Decrease_indent;
+            const ind_delta = self.indent_stack[self.indent_idx - 1] - self.indent_stack[self.indent_idx];
             self.indent_idx -= 1;
+            tok.column = @intCast(u16, self.indent_stack[self.indent_idx]);
+            tok.start = self.last_line_end_idx + tok.column;
+            // -% -> wrapping subtraction
+            tok.end = @intCast(u32, @intCast(i64, tok.start) - ind_delta);
             return tok;
         }
 
@@ -278,6 +291,7 @@ pub const Tokenizer = struct {
                     // since line/col info is only needed on error we only store the
                     // line number and compute the col on demand
                     self.line_count += 1;
+                    self.last_line_end_idx = self.index;
 
                     var indent_spaces: i16 = 0;
                     while (self.peek_next_byte()) |next_byte| : (self.prechecked_advance_to_next_byte()) {
@@ -448,8 +462,10 @@ pub const Tokenizer = struct {
                     // backslash followed by \n (or \r but that is handled before the switch)
                     // is a hard line break
                     // NOTE: make sure we don't actually consume the \n
-                    if (self.peek_next_byte() == @as(u8, '\n')) {
-                        break :blk TokenKind.Hard_line_break;
+                    if (self.peek_next_byte()) |next_byte| {
+                        if (next_byte == @as(u8, '\n') or next_byte == @as(u8, '\r')) {
+                            break :blk TokenKind.Hard_line_break;
+                        }
                     }
 
                     self.advance_to_next_byte();

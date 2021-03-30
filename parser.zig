@@ -31,13 +31,6 @@ pub const Parser = struct {
     open_blocks: [50]*Node,
     open_block_idx: u8,
 
-    state: ParserState = .Default,
-
-    pub const ParserState = enum {
-        Default,
-        Increase_indent_inside_list,
-    };
-
     // each error name across the entire compilation gets assigned an unsigned
     // integer greater than 0. You are allowed to declare the same error name
     // more than once, and if you do, it gets assigned the same integer value
@@ -263,13 +256,6 @@ pub const Parser = struct {
                 //     },
                 //     else => {},
                 // }
-                        switch (self.get_last_block().data) {
-                            NodeKind.UnorderedListItem, NodeKind.OrderedListItem => {
-                                std.debug.print("    Set Increase_indent_inside_list!\n", .{});
-                                self.state = .Increase_indent_inside_list;
-                            },
-                            else => {},
-                        }
                 self.eat_token();
             },
 
@@ -321,7 +307,8 @@ pub const Parser = struct {
                 // remove _ and * from being able to start a thematic break/unordered list
                 // so we don't have to backtrack if parsing doesn't succeed when it was just
                 // being used as emphasis
-                const start_token_kind = self.peek_token().token_kind;
+                const start_token = self.peek_token();
+                const start_token_kind = start_token.token_kind;
                 self.eat_token();
 
                 const next_token = self.peek_token();
@@ -333,7 +320,7 @@ pub const Parser = struct {
                     try self.require_token(TokenKind.Space, " after list item starter!");
                     self.eat_token();
 
-                    try self.parse_unordered_list(start_token_kind);
+                    try self.parse_unordered_list(start_token);
                 } else if (start_token_kind == TokenKind.Dash and
                            next_token.token_kind == TokenKind.Dash and
                            self.peek_next_token().token_kind == TokenKind.Dash) {
@@ -388,6 +375,7 @@ pub const Parser = struct {
                 // maybe ordered list
                 // 1-9 digits (0-9) ending in a '.' or ')'
                 self.eat_token();
+                const next_token = self.peek_token();
                 const next_token_kind = self.peek_token().token_kind;
                 if (next_token_kind == TokenKind.Period or
                         next_token_kind == TokenKind.Close_paren) {
@@ -395,7 +383,7 @@ pub const Parser = struct {
 
                     try self.require_token(TokenKind.Space, " after list item starter!");
                     self.eat_token();
-                    try self.parse_ordered_list(next_token_kind);
+                    try self.parse_ordered_list(next_token);
                 } else {
                     try self.parse_paragraph();
                 }
@@ -510,81 +498,89 @@ pub const Parser = struct {
         }
     }
 
-    fn parse_ordered_list(self: *Parser, item_kind: TokenKind) ParseError!void {
+    fn parse_ordered_list(self: *Parser, start_token: *Token) ParseError!void {
         // TODO use start number
         const last_block_data = self.get_last_block().data;
         // make sure we create a new list on increased indent even if starters match
-        if (self.state != .Increase_indent_inside_list and
-                last_block_data == NodeKind.OrderedListItem and
-                last_block_data.OrderedListItem.list_item_starter == item_kind) {
+        if (last_block_data == NodeKind.OrderedListItem and
+                last_block_data.OrderedListItem.list_item_starter == start_token.token_kind and
+                last_block_data.OrderedListItem.indent == start_token.column) {
             self.close_last_block();
 
             var list_item_node = try self.new_node(self.get_last_block());
             list_item_node.data = .{
-                .OrderedListItem = .{ .list_item_starter = item_kind },
+                .OrderedListItem = .{ 
+                    .list_item_starter = start_token.token_kind,
+                    .indent = start_token.column,
+                },
             };
             self.open_block(list_item_node);
         } else {
             // TODO @CleanUp combine ifs
-            if (self.state != .Increase_indent_inside_list and
-                    last_block_data == NodeKind.OrderedListItem) {
+            if (last_block_data == NodeKind.OrderedListItem and
+                    last_block_data.OrderedListItem.indent == start_token.column) {
                 // also ordered list but different list_item_starter which results
                 // in a new list
                 self.close_last_block();
                 self.close_last_block();
             }
             var list_node = try self.new_node(self.get_last_block());
-            list_node.data = .{
-                .OrderedList = .{ .list_item_starter = item_kind },
-            };
+            list_node.data = .OrderedList;
             // TODO can only be opened inside another container block
             self.open_block(list_node);
 
             var list_item_node = try self.new_node(list_node);
             list_item_node.data = .{
-                .OrderedListItem = .{ .list_item_starter = item_kind },
+                .OrderedListItem = .{ 
+                    .list_item_starter = start_token.token_kind,
+                    .indent = start_token.column,
+                },
             };
             self.open_block(list_item_node);
         }
     }
 
-    fn parse_unordered_list(self: *Parser, item_kind: TokenKind) ParseError!void {
+    fn parse_unordered_list(self: *Parser, start_token: *Token) ParseError!void {
         // TODO figure out a good way (alternative to vanilla md) of how to determine
         // if list should be loose or not
         // if one blank line is present in the contents of any of the list items
         // the list will be loose
 
         const last_block_data = self.get_last_block().data;
-        if (self.state != .Increase_indent_inside_list and
-                last_block_data == NodeKind.UnorderedListItem and
-                last_block_data.UnorderedListItem.list_item_starter == item_kind) {
+        if (last_block_data == NodeKind.UnorderedListItem and
+                last_block_data.UnorderedListItem.list_item_starter == start_token.token_kind and
+                last_block_data.UnorderedListItem.indent == start_token.column) {
             self.close_last_block();
 
             var list_node_item = try self.new_node(self.get_last_block());
             list_node_item.data = .{
-                .UnorderedListItem = .{ .list_item_starter = item_kind },
+                .UnorderedListItem = .{
+                    .list_item_starter = start_token.token_kind,
+                    .indent = start_token.column,
+                },
             };
             self.open_block(list_node_item);
         } else {
             // new list without any previous or start new list due to different
             // list item starters (- vs +)
             // TODO @CleanUp combine ifs
-            if (self.state != .Increase_indent_inside_list and
-                    last_block_data == NodeKind.UnorderedListItem) {
+            if (last_block_data == NodeKind.UnorderedListItem and
+                    last_block_data.UnorderedListItem.indent == start_token.column) {
                 // also unordered list but different list_item_starter which results
                 // in a new list
                 self.close_last_block();
                 self.close_last_block();
             }
             var list_node = try self.new_node(self.get_last_container_block());
-            list_node.data = .{
-                .UnorderedList = .{ .list_item_starter = item_kind },
-            };
+            list_node.data = .UnorderedList;
             self.open_block(list_node);
 
             var list_node_item = try self.new_node(list_node);
             list_node_item.data = .{
-                .UnorderedListItem = .{ .list_item_starter = item_kind },
+                .UnorderedListItem = .{
+                    .list_item_starter = start_token.token_kind,
+                    .indent = start_token.column,
+                },
             };
             self.open_block(list_node_item);
         }
