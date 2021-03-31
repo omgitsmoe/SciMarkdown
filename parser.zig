@@ -260,64 +260,19 @@ pub const Parser = struct {
 
                 self.eat_token();
             },
+
             TokenKind.Decrease_indent => {
-                // std.debug.print("ln:{}: Decrease_indent: block {}\n", .{ self.peek_token().line_nr, self.get_last_block().data });
-                // switch (self.get_last_block().data) {
-                //     NodeKind.UnorderedListItem, NodeKind.OrderedListItem => {
-                //         self.close_last_block();
-                //         self.close_last_block();
-                //     },
-                //     else => self.close_last_block(),
-                // }
                 self.eat_token();
-                // return self.parse_block(indent_change - 1);
             },
             TokenKind.Increase_indent => {
                 self.eat_token();
-                // std.debug.print("ln:{}: Increase_indent: block {}\n", .{ self.peek_token().line_nr, self.get_last_block().data });
-                // only set Increase_indent_inside_list if the next token
-                // can start a list
-                // otherwise
-                // 1. first line
-                //    indented to first line's text
-                // ^ this will trigger an Increase_indent and will result in a new list
-                // but this should only happen on e.g.:
-                // 1. first line
-                //    - indented to first line's text
-                // switch (self.peek_next_token().token_kind) {
-                //     TokenKind.Dash, TokenKind.Plus, TokenKind.Digits => {
-                //         switch (self.get_last_block().data) {
-                //             NodeKind.UnorderedListItem, NodeKind.OrderedListItem => {
-                //                 std.debug.print("    Set Increase_indent_inside_list!\n", .{});
-                //                 self.state = .Increase_indent_inside_list;
-                //             },
-                //             else => {},
-                //         }
-                //     },
-                //     else => {},
-                // }
-                // const last_container_block = self.get_last_container_block();
-                // switch (last_container_block.data) {
-                //     .OrderedListItem, .UnorderedListItem => {
-                //         // ignore increase_indent after first list item line
-                //         const indent = self.peek_token();
-                //         self.eat_token();
-                //         if (indent.column != last_container_block.data.start_column) {
-                //             return self.parse_block(1);
-                //         }
-                //     },
-                //     else => {
-                //         self.eat_token();
-                //         return self.parse_block(1);
-                //     }
-                // }
-                // we can only ever get on .Increase_indent token
             },
 
             TokenKind.Hash => {
                 // atx heading
                 // 1-6 unescaped # followed by ' ' or end-of-line
                 // not doing: optional closing # that don't have to match the number of opening #
+                try self.handle_open_blocks(NodeKind.Heading);
 
                 var heading_lvl: u8 = 1;
                 self.eat_token();
@@ -335,7 +290,6 @@ pub const Parser = struct {
                         " escape the first '#' with a '\\'", .{ tok_after_hashes.line_nr });
                     return ParseError.SyntaxError;
                 } else {
-                    // TODO close_open_block
                     self.eat_token();  // eat space
 
                     // TODO make sure we account for sudden Eof everywhere
@@ -379,6 +333,8 @@ pub const Parser = struct {
                 } else if (start_token_kind == TokenKind.Dash and
                            next_token.token_kind == TokenKind.Dash and
                            self.peek_next_token().token_kind == TokenKind.Dash) {
+                    try self.handle_open_blocks(NodeKind.ThematicBreak);
+
                     self.eat_token();
                     self.eat_token();
 
@@ -445,6 +401,7 @@ pub const Parser = struct {
             },
 
             TokenKind.Backtick_triple => {
+                try self.handle_open_blocks(NodeKind.FencedCode);
                 self.eat_token();
                     
                 // language name or newline
@@ -474,6 +431,8 @@ pub const Parser = struct {
             },
 
             TokenKind.Colon_open_bracket => {
+                try self.handle_open_blocks(NodeKind.LinkRef);
+
                 // link reference definition
                 if (self.open_block_idx > 0) {
                     Parser.report_error(
@@ -530,12 +489,6 @@ pub const Parser = struct {
                 self.close_last_block();
             },
 
-            // TokenKind.Close_angle_bracket => {
-            //     // maybe block quote
-            //     // 0-3 spaces + '>' with an optional following ' '
-            //     // can contain other blocks: headings, code blocks etc.
-            // },
-
             else => {
                 // std.debug.print("Else branch ln {}\n", .{ self.peek_token().line_nr });
                 // self.eat_token();
@@ -574,24 +527,6 @@ pub const Parser = struct {
             return ParseError.SyntaxError;
         }
     }
-
-
-    // fn handle_open_blocks(
-    //     self: *Parser,
-    //     comptime new_block: NodeKind, 
-    //     indent_change: i8
-    //     ) ParseError!void {
-    //     switch (new_block) {
-    //         .OrderedList, .OrderedListItem, .UnorderedList, .UnorderedListItem => {
-    //             if (indent_change > 0) {
-    //                 self.close_blocks_until(Node.is_container_block, false);
-    //             } else if (indent_change < 0) {
-    //                 while (indent_change < 0) : (indent_change += 1) {
-    //                 }
-    //             }
-    //         },
-    //     }
-    // }
 
     fn can_list_continue(self: *Parser, comptime new_list: NodeKind, start_token: *Token) bool {
         const last_block_data = self.get_last_block().data;
@@ -715,17 +650,18 @@ pub const Parser = struct {
         while (try self.parse_inline(true)) {}
         // std.debug.print("ended on ln:{}: Last block: {}\n",
         //     .{ self.peek_token().line_nr ,self.get_last_block().data });
-        // switch (self.peek_token().token_kind) {
-        //     .Newline => {
-        //         self.eat_token();
-        //         if (self.peek_token().token_kind == TokenKind.Newline) {
-        //             // don't eat Newline token of empty line
-        //             // since need that to potentially close other blocks in parse_block
-        //             try self.close_paragraph();
-        //         }
-        //     },
-        //     .Eof => try self.close_paragraph(),
-        // }
+        switch (self.peek_token().token_kind) {
+            .Newline => {
+                self.eat_token();
+                if (self.peek_token().token_kind == TokenKind.Newline) {
+                    // don't eat Newline token of empty line
+                    // since need that to potentially close other blocks in parse_block
+                    try self.close_paragraph();
+                }
+            },
+            .Eof => try self.close_paragraph(),
+            else => {},
+        }
     }
 
     fn close_paragraph(self: *Parser) ParseError!void {
