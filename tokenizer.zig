@@ -304,24 +304,17 @@ pub const Tokenizer = struct {
                         }
                     }
 
-                    if (self.peek_next_byte()) |next_byte| {
-                        if (next_byte != @as(u8, '\n') and next_byte != @as(u8, '\r')) {
-                            // TODO @CleanUp should this be part of the parser?
+                    // NOTE: got rid of this since a blank line between blockquotes would
+                    // swallow the +Indent -Indent
+                    // if (self.peek_next_byte()) |next_byte| {
+                    //     if (next_byte != @as(u8, '\n') and next_byte != @as(u8, '\r')) {
                             // only change indent_status if it's not a blank line
                             //
                             // dont emit any token for change in indentation level here since we first
                             // need the newline token
                             // check if amount of spaces changed changed
                             // TODO keep this v?
-                            // (beyond a threshold of >3 spaces only when INCREASING indent so
-                            //  we don't get .Increase_indent when going from list item starter to the
-                            //  next line:
-                            //  1. starter
-                            //     continue
-                            //    ^ 3rd space
-                            //  but this still triggers:
-                            //  1. starter
-                            //     - sublist
+                            // (beyond a threshold of >1 space only when INCREASING indent)
                             std.debug.print("Indentidx: {}\n", .{self.indent_idx});
                             const indent_delta: i16 = indent_spaces - self.indent_stack[self.indent_idx];
                             if (indent_delta > 1) {
@@ -340,8 +333,8 @@ pub const Tokenizer = struct {
                                 }
                                 self.new_indent_idx = new_indent_idx;
                             }
-                        }
-                    }
+                        // }
+                    // }
 
                     break :blk TokenKind.Newline;
                 },

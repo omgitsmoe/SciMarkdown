@@ -179,7 +179,7 @@ pub const Parser = struct {
         }
 
         while (self.peek_token().token_kind != TokenKind.Eof) {
-            try self.parse_block();
+            try self.parse_block(0);
         }
     }
 
@@ -218,7 +218,7 @@ pub const Parser = struct {
         std.log.err(err_msg, args);
     }
 
-    fn parse_block(self: *Parser) ParseError!void {
+    fn parse_block(self: *Parser, indent_change: i8) ParseError!void {
         switch (self.peek_token().token_kind) {
             TokenKind.Comment => {
                 self.eat_token();
@@ -263,12 +263,17 @@ pub const Parser = struct {
 
             TokenKind.Decrease_indent => {
                 self.eat_token();
+                return self.parse_block(indent_change - 1);
             },
             TokenKind.Increase_indent => {
                 self.eat_token();
-                if (self.peek_token().token_kind == TokenKind.Double_quote_triple) {
-                    self.eat_token();
-                    try self.require_token(TokenKind.Newline, " after blockquote!");
+                return self.parse_block(1);  // can't get more than on +Indent
+            },
+
+            TokenKind.Double_quote_triple => {
+                self.eat_token();
+                if (indent_change > 0) {
+                    try self.require_token(TokenKind.Newline, " after blockquote opener '\"\"\"'!");
                     self.eat_token();
 
                     // start blockquote
@@ -276,17 +281,12 @@ pub const Parser = struct {
                     var blockquote_node: *Node = try self.new_node(self.get_last_block());
                     blockquote_node.data = .BlockQuote;
                     self.open_block(blockquote_node);
-                }
-            },
-
-            TokenKind.Double_quote_triple => {
-                self.eat_token();
-                if (self.peek_token().token_kind == TokenKind.Newline) {
+                } else if (self.peek_token().token_kind == TokenKind.Newline) {
                     self.eat_token();
                     // """ then blank line closes blockquote
                     try self.require_token(
-                        TokenKind.Newline, " after '\"\"\"\\n' when closing a blockquote!");
-                    self.eat_token();  // eat 2nd \n
+                        TokenKind.Decrease_indent, " after '\"\"\"\\n' when closing a blockquote!");
+                    self.eat_token();  // eat -Indent
                     // end blockquote
                     switch (self.get_last_block().data) {
                         .Paragraph => {
@@ -693,6 +693,12 @@ pub const Parser = struct {
         switch (self.peek_token().token_kind) {
             .Newline => {
                 self.eat_token();
+                // NOTE: migh encounter .Increase_indent here which might be followed
+                // by a Newline which should conunt as blank line
+                // paragraph will be close anyway due to parse_block's .Newline switch prong
+                // TODO either make function that checks for a blank line (ignoring .Increase_indent)
+                // or make it an error in the tokenizer if a blank line contains whitespace
+                // (W293 PEP8 warning)
                 if (self.peek_token().token_kind == TokenKind.Newline) {
                     // don't eat Newline token of empty line
                     // since need that to potentially close other blocks in parse_block

@@ -88,6 +88,8 @@ This is a normal paragraph %% and this is a comment
    To have a line break without a paragraph, you will need to end the line with a \
    Note that this line is separate, but within the same paragraph.  
    (This is contrary to the typical GFM line break behaviour, where trailing spaces are not required.)
+     
+   Should be sep paragraph
 
 %% asterisk (\*) removed from list item starters
 %% * Unordered list can use asterisks
@@ -114,6 +116,17 @@ This is a normal paragraph %% and this is a comment
         - Sublist 1
     - List 1 continue
     + List 2
+    """
+
+    """
+    Blockquotes are very handy in email to emulate reply text.
+    This line is part of the same quote.
+    """
+
+Quote break.
+
+    """
+    This is a very long line that will still be quoted properly when it wraps. Oh boy let's keep writing to make sure this is long enough to actually wrap for everyone. Oh, you can *put* **Markdown** into a blockquote. 
     """
 
 
@@ -209,17 +222,7 @@ raw Markdown line up prettily. You can also use inline Markdown.
 | 1 | 2 | 3
 
 
-## Blockquote
-
-> Blockquotes are very handy in email to emulate reply text.
-> This line is part of the same quote.
-
-Quote break.
-
-> This is a very long line that will still be quoted properly when it wraps. Oh boy let's keep writing to make sure this is long enough to actually wrap for everyone. Oh, you can *put* **Markdown** into a blockquote. 
-
-
-**Inline HTML was left out intentionally**
+**Inline HTML removed in this markdown style!**
 
 
 ## Horizontal rule
