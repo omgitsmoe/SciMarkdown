@@ -16,11 +16,11 @@ pub const Node = struct {
     // separate kind field
     data: NodeData,
 
-    const LinkData = struct { label: ?[]const u8, url: ?[]const u8, title: ?[]const u8 };
-    const EmphData = struct { opener_token_kind: TokenKind };
-    const ListItemData = struct { list_item_starter: TokenKind, indent: u16 };
+    pub const LinkData = struct { label: ?[]const u8, url: ?[]const u8, title: ?[]const u8 };
+    pub const EmphData = struct { opener_token_kind: TokenKind };
+    pub const ListItemData = struct { list_item_starter: TokenKind, indent: u16 };
     // tagged union
-    const NodeData = union(enum) {
+    pub const NodeData = union(enum) {
         // special
         Undefined,
         Document,
@@ -92,30 +92,46 @@ pub const Node = struct {
 
         child.parent = self;
     }
-
-    pub inline fn is_container_block(self: *Node) bool {
-        return switch (self.data) {
-            .BlockQuote, .UnorderedList, .UnorderedListItem, .OrderedList, .OrderedListItem => true,
-            else => false,
-        };
-    }
-
-    pub inline fn is_leaf_block(self: *Node) bool {
-        return switch (self.data) {
-            .ThematicBreak, .Heading, .FencedCode, .LinkRef, .Paragraph, .BlankLine, .Image => true,
-            else => false,
-        };
-    }
-
-    pub inline fn children_allowed(self: *Node) bool {
-        return switch (self.data) {
-            .Undefined, .CodeSpan, .ThematicBreak, .FencedCode, .LinkRef,
-            .BlankLine, .Image, .Autolink, .HardLineBreak, .Text => false,
-            else => true,
-        };
-    }
-
-    pub inline fn is_block(self: *Node) bool {
-        return is_container_block(self) or is_leaf_block(self);
-    }
 };
+
+pub inline fn is_container_block(self: NodeKind) bool {
+    return switch (self) {
+        .Document, .BlockQuote, .UnorderedList, .UnorderedListItem, .OrderedList, .OrderedListItem => true,
+        else => false,
+    };
+}
+
+pub inline fn is_leaf_block(self: NodeKind) bool {
+    return switch (self) {
+        .ThematicBreak, .Heading, .FencedCode, .LinkRef, .Paragraph, .BlankLine, .Image => true,
+        else => false,
+    };
+}
+
+pub inline fn is_inline(self: NodeKind) bool {
+    return switch (self) {
+        .CodeSpan, .Emphasis, .StrongEmphasis, .Strikethrough, .Link,
+        .Autolink, .HardLineBreak, .Text, => true,
+        else => false,
+    };
+}
+
+pub inline fn can_hold(self: NodeKind, other: NodeKind) bool {
+    if (is_container_block(self)) {
+        return true;
+    } else {
+        return if (is_inline(other)) true else false;
+    }
+}
+
+pub inline fn children_allowed(self: NodeKind) bool {
+    return switch (self) {
+        .Undefined, .CodeSpan, .ThematicBreak, .FencedCode, .LinkRef,
+        .BlankLine, .Image, .Autolink, .HardLineBreak, .Text => false,
+        else => true,
+    };
+}
+
+pub inline fn is_block(self: NodeKind) bool {
+    return is_container_block(self) or is_leaf_block(self);
+}

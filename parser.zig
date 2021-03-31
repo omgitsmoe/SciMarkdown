@@ -93,7 +93,7 @@ pub const Parser = struct {
         // if (!parent.children_allowed()) {
         //     std.debug.print("ln:{}: NO CHILDREN: {}\n", .{self.peek_token().line_nr, parent.data});
         // }
-        std.debug.assert(parent.children_allowed());
+        std.debug.assert(ast.children_allowed(parent.data));
         const node = try Node.create(&self.node_arena.allocator);
         parent.append_child(node);
         // invalidate last text block; doing this manually was too error prone
@@ -115,12 +115,50 @@ pub const Parser = struct {
     inline fn get_last_container_block(self: *Parser) *Node {
         var i: u8 = self.open_block_idx;
         while (i > 0) : (i -= 1) {
-            if (self.open_blocks[i].is_container_block()) {
+            if (ast.is_container_block(self.open_blocks[i].data)) {
                 return self.open_blocks[i];
             }
         }
         // return current_document which is open_blocks[0]
         return self.current_document;
+    }
+
+    inline fn get_last_leaf_block(self: *Parser) ?*Node {
+        var i: u8 = self.open_block_idx;
+        while (i > 0) : (i -= 1) {
+            if (ast.is_leaf_block(self.open_blocks[i].data)) {
+                return self.open_blocks[i];
+            }
+        }
+        return null;
+    }
+
+    inline fn close_blocks_until(
+        self: *Parser,
+        comptime match: fn (self: *Node) bool,
+        comptime close_first_match: bool
+    ) void {
+        var i: u8 = self.open_block_idx;
+        while (i > 0) : (i -= 1) {
+            if (match(self.open_blocks[i])) {
+                self.open_block_idx = if (!close_first_match) i else i - 1;
+                break;
+            }
+        }
+    }
+
+    inline fn close_blocks_until_kind(
+        self: *Parser,
+        comptime kind: NodeKind,
+        comptime close_first_match: bool
+    ) void {
+        var i: u8 = self.open_block_idx;
+        while (i > 0) : (i -= 1) {
+            if (self.open_blocks[i].data == kind) {
+                self.open_block_idx = if (!close_first_match) i else i - 1;
+                break;
+            }
+        }
     }
 
     inline fn close_last_block(self: *Parser) void {
@@ -214,7 +252,7 @@ pub const Parser = struct {
                     }
                     self.eat_token();  // eat both \n
                 } else if (self.open_block_idx > 0 and
-                           !self.get_last_block().is_container_block()) {
+                           !ast.is_container_block(self.get_last_block().data)) {
                     std.debug.print("ln:{}: Close block: {}\n",
                         .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
                     self.close_last_block();
@@ -223,18 +261,20 @@ pub const Parser = struct {
                 self.eat_token();
             },
             TokenKind.Decrease_indent => {
-                std.debug.print("ln:{}: Decrease_indent: block {}\n", .{ self.peek_token().line_nr, self.get_last_block().data });
-                switch (self.get_last_block().data) {
-                    NodeKind.UnorderedListItem, NodeKind.OrderedListItem => {
-                        self.close_last_block();
-                        self.close_last_block();
-                    },
-                    else => self.close_last_block(),
-                }
+                // std.debug.print("ln:{}: Decrease_indent: block {}\n", .{ self.peek_token().line_nr, self.get_last_block().data });
+                // switch (self.get_last_block().data) {
+                //     NodeKind.UnorderedListItem, NodeKind.OrderedListItem => {
+                //         self.close_last_block();
+                //         self.close_last_block();
+                //     },
+                //     else => self.close_last_block(),
+                // }
                 self.eat_token();
+                // return self.parse_block(indent_change - 1);
             },
             TokenKind.Increase_indent => {
-                std.debug.print("ln:{}: Increase_indent: block {}\n", .{ self.peek_token().line_nr, self.get_last_block().data });
+                self.eat_token();
+                // std.debug.print("ln:{}: Increase_indent: block {}\n", .{ self.peek_token().line_nr, self.get_last_block().data });
                 // only set Increase_indent_inside_list if the next token
                 // can start a list
                 // otherwise
@@ -256,7 +296,22 @@ pub const Parser = struct {
                 //     },
                 //     else => {},
                 // }
-                self.eat_token();
+                // const last_container_block = self.get_last_container_block();
+                // switch (last_container_block.data) {
+                //     .OrderedListItem, .UnorderedListItem => {
+                //         // ignore increase_indent after first list item line
+                //         const indent = self.peek_token();
+                //         self.eat_token();
+                //         if (indent.column != last_container_block.data.start_column) {
+                //             return self.parse_block(1);
+                //         }
+                //     },
+                //     else => {
+                //         self.eat_token();
+                //         return self.parse_block(1);
+                //     }
+                // }
+                // we can only ever get on .Increase_indent token
             },
 
             TokenKind.Hash => {
@@ -498,119 +553,189 @@ pub const Parser = struct {
         }
     }
 
-    fn parse_ordered_list(self: *Parser, start_token: *Token) ParseError!void {
-        // TODO use start number
-        const last_block_data = self.get_last_block().data;
-        // make sure we create a new list on increased indent even if starters match
-        if (last_block_data == NodeKind.OrderedListItem and
-                last_block_data.OrderedListItem.list_item_starter == start_token.token_kind and
-                last_block_data.OrderedListItem.indent == start_token.column) {
-            self.close_last_block();
-
-            var list_item_node = try self.new_node(self.get_last_block());
-            list_item_node.data = .{
-                .OrderedListItem = .{ 
-                    .list_item_starter = start_token.token_kind,
-                    .indent = start_token.column,
-                },
-            };
-            self.open_block(list_item_node);
-        } else {
-            // TODO @CleanUp combine ifs
-            if (last_block_data == NodeKind.OrderedListItem and
-                    last_block_data.OrderedListItem.indent == start_token.column) {
-                // also ordered list but different list_item_starter which results
-                // in a new list
-                self.close_last_block();
-                self.close_last_block();
+    fn handle_open_blocks(self: *Parser, comptime new_block: NodeKind) ParseError!void {
+        // there should be no remaining open inline elements
+        // when opening new leaf/container blocks
+        if (!ast.is_inline(new_block)) {
+            if (ast.is_inline(self.get_last_block().data)) {
+                Parser.report_error(
+                    "ln:{}: There was at least one unclosed inline element of type '{}'\n",
+                    .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
+                return ParseError.SyntaxError;
             }
-            var list_node = try self.new_node(self.get_last_block());
-            list_node.data = .OrderedList;
-            // TODO can only be opened inside another container block
-            self.open_block(list_node);
-
-            var list_item_node = try self.new_node(list_node);
-            list_item_node.data = .{
-                .OrderedListItem = .{ 
-                    .list_item_starter = start_token.token_kind,
-                    .indent = start_token.column,
-                },
-            };
-            self.open_block(list_item_node);
+        }
+        if (self.get_last_block().data == NodeKind.Paragraph) {
+            try self.close_paragraph();
+        }
+        if (!ast.can_hold(self.get_last_block().data, new_block)) {
+            Parser.report_error(
+                "ln:{}: Previous block of type '{}' can't hold new block of type '{}'\n",
+                .{ self.peek_token().line_nr, @tagName(self.get_last_block().data), new_block });
+            return ParseError.SyntaxError;
         }
     }
 
+
+    // fn handle_open_blocks(
+    //     self: *Parser,
+    //     comptime new_block: NodeKind, 
+    //     indent_change: i8
+    //     ) ParseError!void {
+    //     switch (new_block) {
+    //         .OrderedList, .OrderedListItem, .UnorderedList, .UnorderedListItem => {
+    //             if (indent_change > 0) {
+    //                 self.close_blocks_until(Node.is_container_block, false);
+    //             } else if (indent_change < 0) {
+    //                 while (indent_change < 0) : (indent_change += 1) {
+    //                 }
+    //             }
+    //         },
+    //     }
+    // }
+
+    fn can_list_continue(self: *Parser, comptime new_list: NodeKind, start_token: *Token) bool {
+        const last_block_data = self.get_last_block().data;
+        var list_data: Node.ListItemData = undefined;
+        switch (last_block_data) {
+            .OrderedListItem, .UnorderedListItem => |data| {
+                list_data = data;
+            },
+            else => return false,
+        }
+        // const union_field_name = @tagName(new_list);
+        var other_list_type = switch (new_list) {
+            .OrderedListItem => NodeKind.UnorderedListItem,
+            .UnorderedListItem => NodeKind.OrderedListItem,
+            else => unreachable,
+        };
+
+        if (start_token.column == list_data.indent) {
+            if (last_block_data == new_list) {
+                if (list_data.list_item_starter == start_token.token_kind) {
+                    // same list type, same indent, same list starter
+                    self.close_last_block();
+                    return true;
+                } else {
+                    // same list type, same indent, __different__ list starter
+                    self.close_last_block();
+                    self.close_last_block();
+                    return false;
+                }
+            } else if (last_block_data == other_list_type) {
+                // diff list type, same indent
+                // close previou list
+                self.close_last_block();
+                self.close_last_block();
+                return false;
+            }
+        } else if (start_token.column < list_data.indent) {
+            // previous list was on a farther indent
+            // => close it
+            self.close_last_block();
+            self.close_last_block();
+            // test again
+            return self.can_list_continue(new_list, start_token);
+        } else {
+            // start_token.column > indent
+            // increased indent -> don't close anything
+            return false;
+        }
+
+        unreachable;
+    }
+
+    fn parse_ordered_list(self: *Parser, start_token: *Token) ParseError!void {
+        try self.handle_open_blocks(NodeKind.OrderedListItem);
+
+        // TODO use start number
+
+        var list_node: *Node = undefined;
+        // create new list if it can't continue
+        if (!self.can_list_continue(NodeKind.OrderedListItem, start_token)) {
+            list_node = try self.new_node(self.get_last_block());
+            list_node.data = .OrderedList;
+            self.open_block(list_node);
+        } else {
+            list_node = self.get_last_block();
+            std.debug.assert(list_node.data == NodeKind.OrderedList);
+        }
+
+        var list_item_node = try self.new_node(list_node);
+        list_item_node.data = .{
+            .OrderedListItem = .{ 
+                .list_item_starter = start_token.token_kind,
+                .indent = start_token.column,
+            },
+        };
+        self.open_block(list_item_node);
+    }
+
     fn parse_unordered_list(self: *Parser, start_token: *Token) ParseError!void {
+        try self.handle_open_blocks(NodeKind.UnorderedListItem);
         // TODO figure out a good way (alternative to vanilla md) of how to determine
         // if list should be loose or not
         // if one blank line is present in the contents of any of the list items
         // the list will be loose
 
-        const last_block_data = self.get_last_block().data;
-        if (last_block_data == NodeKind.UnorderedListItem and
-                last_block_data.UnorderedListItem.list_item_starter == start_token.token_kind and
-                last_block_data.UnorderedListItem.indent == start_token.column) {
-            self.close_last_block();
-
-            var list_node_item = try self.new_node(self.get_last_block());
-            list_node_item.data = .{
-                .UnorderedListItem = .{
-                    .list_item_starter = start_token.token_kind,
-                    .indent = start_token.column,
-                },
-            };
-            self.open_block(list_node_item);
-        } else {
-            // new list without any previous or start new list due to different
-            // list item starters (- vs +)
-            // TODO @CleanUp combine ifs
-            if (last_block_data == NodeKind.UnorderedListItem and
-                    last_block_data.UnorderedListItem.indent == start_token.column) {
-                // also unordered list but different list_item_starter which results
-                // in a new list
-                self.close_last_block();
-                self.close_last_block();
-            }
-            var list_node = try self.new_node(self.get_last_container_block());
+        var list_node: *Node = undefined;
+        // create new list if it can't continue
+        if (!self.can_list_continue(NodeKind.UnorderedListItem, start_token)) {
+            list_node = try self.new_node(self.get_last_container_block());
             list_node.data = .UnorderedList;
             self.open_block(list_node);
-
-            var list_node_item = try self.new_node(list_node);
-            list_node_item.data = .{
-                .UnorderedListItem = .{
-                    .list_item_starter = start_token.token_kind,
-                    .indent = start_token.column,
-                },
-            };
-            self.open_block(list_node_item);
+        } else {
+            list_node = self.get_last_block();
+            std.debug.assert(list_node.data == NodeKind.UnorderedList);
         }
 
-        try self.parse_block();
+        var list_node_item = try self.new_node(list_node);
+        list_node_item.data = .{
+            .UnorderedListItem = .{
+                .list_item_starter = start_token.token_kind,
+                .indent = start_token.column,
+            },
+        };
+        self.open_block(list_node_item);
     }
 
     fn parse_paragraph(self: *Parser) ParseError!void {
-        var paragraph = try self.new_node(self.get_last_block());
-        paragraph.data = NodeKind.Paragraph;
-        self.open_block(paragraph);
-        while (try self.parse_inline(false)) { 
-            if (self.peek_token().token_kind == TokenKind.Newline) {
-                self.eat_token();
-                if (self.peek_token().token_kind == TokenKind.Newline) {
-                    // don't eat Newline token of empty line
-                    // since need that to potentially close other blocks in parse_block
-                    break;
-                }
-            }
+        // parse_inline stops on Increase_indent after first list item
+        // even though we could continue (unless next line starts another block)
+        // -> check last block and contiue paragraph if we can
+        const last_leaf_block = self.get_last_leaf_block();
+        if (last_leaf_block != null)
+            std.debug.print("ln:{}: Last leaf block {}\n",
+                .{ self.peek_token().line_nr,  @tagName(last_leaf_block.?.data) });
+        if (last_leaf_block == null or last_leaf_block.?.data != NodeKind.Paragraph) {
+            var paragraph = try self.new_node(self.get_last_block());
+            paragraph.data = NodeKind.Paragraph;
+            self.open_block(paragraph);
         }
+        // stops on newline, eof, increase_indent, dedent
+        while (try self.parse_inline(true)) {}
         // std.debug.print("ended on ln:{}: Last block: {}\n",
         //     .{ self.peek_token().line_nr ,self.get_last_block().data });
+        // switch (self.peek_token().token_kind) {
+        //     .Newline => {
+        //         self.eat_token();
+        //         if (self.peek_token().token_kind == TokenKind.Newline) {
+        //             // don't eat Newline token of empty line
+        //             // since need that to potentially close other blocks in parse_block
+        //             try self.close_paragraph();
+        //         }
+        //     },
+        //     .Eof => try self.close_paragraph(),
+        // }
+    }
 
+    fn close_paragraph(self: *Parser) ParseError!void {
         if (self.get_last_block().data != NodeKind.Paragraph) {
             Parser.report_error(
                 "ln:{}: There was at least one unclosed inline element of type '{}'\n",
                 .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
             return ParseError.SyntaxError;
         }
+
         self.close_last_block();
     }
 
