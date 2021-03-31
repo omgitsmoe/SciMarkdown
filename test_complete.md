@@ -88,7 +88,9 @@ This is a normal paragraph %% and this is a comment
    To have a line break without a paragraph, you will need to end the line with a \
    Note that this line is separate, but within the same paragraph.  
    (This is contrary to the typical GFM line break behaviour, where trailing spaces are not required.)
-     
+
+%% uncommenting this will be an error since a blank line would now contain whitespace
+%%     
    Should be sep paragraph
 
 %% asterisk (\*) removed from list item starters
@@ -182,7 +184,7 @@ Inline `code` has `back-ticks around` it.
 var s = "JavaScript syntax highlighting";
 alert(s);
 ```
- 
+
 ```python
 %% same comment token as we have
 s = "Python syntax highlighting"
@@ -193,7 +195,7 @@ if s == "":
 else:
     print s
 ```
- 
+
 ```
 No language indicated, so no syntax highlighting. 
 But let's throw in a <b>tag</b>.

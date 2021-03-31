@@ -166,6 +166,7 @@ pub const Tokenizer = struct {
 
     pub const Error = error {
         UnmachtingDedent,
+        BlankLineContainsWhiteSpace,
     };
 
     pub fn init(allocator: *std.mem.Allocator, filename: []const u8) !Tokenizer {
@@ -304,37 +305,46 @@ pub const Tokenizer = struct {
                         }
                     }
 
+                    // only change indent_status if it's not a blank line
                     // NOTE: got rid of this since a blank line between blockquotes would
                     // swallow the +Indent -Indent
-                    // if (self.peek_next_byte()) |next_byte| {
-                    //     if (next_byte != @as(u8, '\n') and next_byte != @as(u8, '\r')) {
-                            // only change indent_status if it's not a blank line
-                            //
-                            // dont emit any token for change in indentation level here since we first
-                            // need the newline token
-                            // check if amount of spaces changed changed
-                            // TODO keep this v?
-                            // (beyond a threshold of >1 space only when INCREASING indent)
-                            std.debug.print("Indentidx: {}\n", .{self.indent_idx});
-                            const indent_delta: i16 = indent_spaces - self.indent_stack[self.indent_idx];
-                            if (indent_delta > 1) {
-                                self.new_indent_idx = self.indent_idx + 1;
-                                self.indent_stack[self.new_indent_idx] = indent_spaces;
-                            } else if (indent_delta < 0) {
-                                var new_indent_idx = self.indent_idx;
-                                while (self.indent_stack[new_indent_idx] != indent_spaces) : (
-                                    new_indent_idx -= 1) {
-                                    if (new_indent_idx == 0) {
-                                        Tokenizer.report_error(
-                                            "ln:{}: No indentation level matches the last indent!\n",
-                                            .{ self.line_count });  // not tok.line_nr since its the next line
-                                        return Error.UnmachtingDedent;
-                                    }
-                                }
-                                self.new_indent_idx = new_indent_idx;
+                    // make blank lines containing whitespace an error instead
+                    // (similar to e.g. PEP8 W293 in python, but more extreme)
+                    // TODO is this too obnoxious?
+                    if (self.peek_next_byte()) |next_byte| {  // need this due to compiler bug involving optionals
+                        if (indent_spaces > 0 and
+                                (next_byte == @as(u8, '\n') or next_byte == @as(u8, '\r'))) {
+                            Tokenizer.report_error(
+                                "ln:{}: Blank line contains whitespace!\n",
+                                .{ self.line_count });  // not tok.line_nr since its the next line
+                            return Error.BlankLineContainsWhiteSpace;
+
+                        }
+                    }
+                    
+                    // dont emit any token for change in indentation level here since we first
+                    // need the newline token
+                    // check if amount of spaces changed changed
+                    // TODO keep this v?
+                    // (beyond a threshold of >1 space only when INCREASING indent)
+                    std.debug.print("Indentidx: {}\n", .{self.indent_idx});
+                    const indent_delta: i16 = indent_spaces - self.indent_stack[self.indent_idx];
+                    if (indent_delta > 1) {
+                        self.new_indent_idx = self.indent_idx + 1;
+                        self.indent_stack[self.new_indent_idx] = indent_spaces;
+                    } else if (indent_delta < 0) {
+                        var new_indent_idx = self.indent_idx;
+                        while (self.indent_stack[new_indent_idx] != indent_spaces) : (
+                            new_indent_idx -= 1) {
+                            if (new_indent_idx == 0) {
+                                Tokenizer.report_error(
+                                    "ln:{}: No indentation level matches the last indent!\n",
+                                    .{ self.line_count });  // not tok.line_nr since its the next line
+                                return Error.UnmachtingDedent;
                             }
-                        // }
-                    // }
+                        }
+                        self.new_indent_idx = new_indent_idx;
+                    }
 
                     break :blk TokenKind.Newline;
                 },
