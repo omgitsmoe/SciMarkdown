@@ -266,6 +266,46 @@ pub const Parser = struct {
             },
             TokenKind.Increase_indent => {
                 self.eat_token();
+                if (self.peek_token().token_kind == TokenKind.Double_quote_triple) {
+                    self.eat_token();
+                    try self.require_token(TokenKind.Newline, " after blockquote!");
+                    self.eat_token();
+
+                    // start blockquote
+                    try self.handle_open_blocks(NodeKind.BlockQuote);
+                    var blockquote_node: *Node = try self.new_node(self.get_last_block());
+                    blockquote_node.data = .BlockQuote;
+                    self.open_block(blockquote_node);
+                }
+            },
+
+            TokenKind.Double_quote_triple => {
+                self.eat_token();
+                if (self.peek_token().token_kind == TokenKind.Newline) {
+                    self.eat_token();
+                    // """ then blank line closes blockquote
+                    try self.require_token(
+                        TokenKind.Newline, " after '\"\"\"\\n' when closing a blockquote!");
+                    self.eat_token();  // eat 2nd \n
+                    // end blockquote
+                    switch (self.get_last_block().data) {
+                        .Paragraph => {
+                            try self.close_paragraph();
+                            // close everything up to and including the blockquote
+                            // (needed so open lists are also closed)
+                            self.close_blocks_until_kind(NodeKind.BlockQuote, true);
+                        },
+                        .BlockQuote => {
+                            self.close_last_block();
+                        },
+                        else => {
+                            Parser.report_error(
+                                "ln:{}: Unclosed block of type '{}' prevented closing a blockquote!\n",
+                                .{ self.peek_token().line_nr - 1, @tagName(self.get_last_block().data) });
+                            return ParseError.SyntaxError;
+                        },
+                    }
+                }
             },
 
             TokenKind.Hash => {
@@ -298,7 +338,7 @@ pub const Parser = struct {
                         return ParseError.SyntaxError;
                     }
 
-                    var heading_node: *Node = try self.new_node(self.current_document);
+                    var heading_node: *Node = try self.new_node(self.get_last_block());
                     heading_node.data = .{
                         .Heading = .{ .level = heading_lvl },
                     };

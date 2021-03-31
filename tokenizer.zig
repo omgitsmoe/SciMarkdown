@@ -33,6 +33,7 @@ pub const TokenKind = enum {
     Close_angle_bracket,
 
     Double_quote,
+    Double_quote_triple,
     Single_quote,
     Backtick,
     Backtick_triple,
@@ -85,6 +86,7 @@ pub const TokenKind = enum {
             .Close_angle_bracket => ">",
 
             .Double_quote => "\"",
+            .Double_quote_triple => "\"\"\"",
             .Single_quote => "'",
             .Backtick => "`",
             .Backtick_triple => "```",
@@ -409,7 +411,19 @@ pub const Tokenizer = struct {
                 '<' => .Open_angle_bracket,
                 '>' => .Close_angle_bracket,
 
-                '"' => .Double_quote,
+                '"' => blk: {
+                    if (self.peek_next_byte() == @as(u8, '"')) {
+                        self.prechecked_advance_to_next_byte();
+                        if (self.peek_next_byte() == @as(u8, '"')) {
+                            self.prechecked_advance_to_next_byte();
+                            break :blk TokenKind.Double_quote_triple;
+                        } else {
+                            break :blk TokenKind.Text;
+                        }
+                    } else {
+                        break :blk TokenKind.Double_quote;
+                    }
+                },
                 '\'' => .Single_quote,
                 '`' => blk: {
                     if (self.peek_next_byte() == @intCast(u8, '`')) {

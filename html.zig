@@ -77,6 +77,13 @@ pub const HTMLGenerator = struct {
                     try self.html_buf.appendSlice(code.code);
                     try self.html_buf.appendSlice("</code></pre>\n");
                 },
+                .BlockQuote => {
+                    if (!node_info.is_end) {
+                        try self.html_buf.appendSlice("<blockquote>\n");
+                    } else {
+                        try self.html_buf.appendSlice("</blockquote>\n");
+                    }
+                },
                 .Paragraph => {
                     if (!node_info.is_end) {
                         try self.html_buf.appendSlice("<p>\n");
