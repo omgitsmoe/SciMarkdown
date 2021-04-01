@@ -327,7 +327,6 @@ pub const Tokenizer = struct {
                     // check if amount of spaces changed changed
                     // TODO keep this v?
                     // (beyond a threshold of >1 space only when INCREASING indent)
-                    std.debug.print("Indentidx: {}\n", .{self.indent_idx});
                     const indent_delta: i16 = indent_spaces - self.indent_stack[self.indent_idx];
                     if (indent_delta > 1) {
                         self.new_indent_idx = self.indent_idx + 1;
@@ -399,6 +398,14 @@ pub const Tokenizer = struct {
                     }
                 },
                 '|' => .Bar,
+                '!' => blk: {
+                    if (self.peek_next_byte() == @as(u8, '[')) {
+                        self.prechecked_advance_to_next_byte();
+                        break :blk TokenKind.Exclamation_open_bracket;
+                    } else {
+                        break :blk TokenKind.Text;
+                    }
+                },
 
                 '(' => .Open_paren,
                 ')' => .Close_paren,

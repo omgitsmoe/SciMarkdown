@@ -529,6 +529,52 @@ pub const Parser = struct {
                 self.close_last_block();
             },
 
+            TokenKind.Exclamation_open_bracket => {
+                self.eat_token();
+                try self.handle_open_blocks(NodeKind.Image);
+
+                var img_node = try self.new_node(self.get_last_block());
+                img_node.data = .{
+                    .Image = .{
+                        .alt = undefined,
+                        .label = null,
+                        .url = null,
+                        .title = null,
+                    },
+                };
+                self.open_block(img_node);
+
+                var token = self.peek_token();
+                const alt_start = token;
+                while (token.token_kind != TokenKind.Close_bracket) {
+                    if (token.token_kind == TokenKind.Eof) {
+                        Parser.report_error(
+                            "ln:{}: Encountered end of file inside image alt text block '[...]'!\n",
+                            .{ alt_start.line_nr });
+                        return ParseError.SyntaxError;
+                    }
+                    self.eat_token();
+                    token = self.peek_token();
+                }
+                self.eat_token();
+                const alt_end = token;
+                img_node.data.Image.alt = self.tokenizer.bytes[alt_start.start .. alt_end.start];
+
+                switch (self.peek_token().token_kind) {
+                    .Open_bracket => {
+                        img_node.data.Image.label = try self.parse_link_ref_label(NodeKind.Image);
+                    },
+                    .Open_paren => try self.parse_link_destination(),
+                    else => {
+                        Parser.report_error(
+                            "ln:{}: Expected image label '[' or image destination '(' starter, " ++
+                            "got '{}' instead!\n",
+                            .{ self.peek_token().line_nr, self.peek_token().token_kind.name() });
+                        return ParseError.SyntaxError;
+                    },
+                }
+            },
+
             else => {
                 // std.debug.print("Else branch ln {}\n", .{ self.peek_token().line_nr });
                 // self.eat_token();
@@ -926,26 +972,7 @@ pub const Parser = struct {
 
         var token = self.peek_token();
         if (token.token_kind == TokenKind.Open_bracket) {
-            // start of link label referring to a reference definition
-            self.eat_token();
-
-            token = self.peek_token();
-            const start_token = token;
-            while (true) {
-                if (token.token_kind == TokenKind.Close_bracket) {
-                    self.eat_token();
-                    break;
-                } else if (token.token_kind == TokenKind.Eof) {
-                    Parser.report_error(
-                        "ln:{}: Encountered end-of-file inside Link label brackets\n",
-                        .{ token.line_nr });
-                    return ParseError.SyntaxError;
-                }
-                self.eat_token();
-                token = self.peek_token();
-            }
-            const label_end = token.start;
-            link_node.data.Link.label = self.tokenizer.bytes[start_token.start..label_end];
+            link_node.data.Link.label = try self.parse_link_ref_label(NodeKind.Link);
         } else if (token.token_kind == TokenKind.Open_paren) {
             // start of url
             try self.parse_link_destination();  // expects to start on (
@@ -956,6 +983,32 @@ pub const Parser = struct {
         self.close_last_block();
 
         std.debug.print("ln:{}: Link: {}\n", .{ link_text_start_token.line_nr, link_node.data });
+    }
+
+    fn parse_link_ref_label(self: *Parser, comptime kind: NodeKind) ParseError![]const u8 {
+        // TODO compiler bug: expected token '}', found 'DocComment'
+        // if function starts with a ///
+        // /// expects to start on [
+        // start of link label referring to a reference definition
+        self.eat_token();
+
+        var token = self.peek_token();
+        const start_token = token;
+        while (true) {
+            if (token.token_kind == TokenKind.Close_bracket) {
+                self.eat_token();
+                break;
+            } else if (token.token_kind == TokenKind.Eof) {
+                Parser.report_error(
+                    "ln:{}: Encountered end-of-file inside {} label brackets\n",
+                    .{ token.line_nr, @tagName(kind) });
+                return ParseError.SyntaxError;
+            }
+            self.eat_token();
+            token = self.peek_token();
+        }
+        const label_end = token.start;
+        return self.tokenizer.bytes[start_token.start..label_end];
     }
 
     fn parse_code_block(self: *Parser) ParseError!void {
@@ -1087,6 +1140,10 @@ pub const Parser = struct {
                     value.*.url = self.tokenizer.bytes[token_url_start.start..token_url_end.start];
                     value.*.title = self.tokenizer.bytes[link_title_start.start..link_title_end.start];
                 },
+                .Image => |*value| {
+                    value.*.url = self.tokenizer.bytes[token_url_start.start..token_url_end.start];
+                    value.*.title = self.tokenizer.bytes[link_title_start.start..link_title_end.start];
+                },
                 else => unreachable,
             }
         } else {
@@ -1094,6 +1151,10 @@ pub const Parser = struct {
 
             switch (link_or_ref.data) {
                 .Link, .LinkRef => |*value| {
+                    value.*.url = self.tokenizer.bytes[token_url_start.start..token_url_end.start];
+                    value.*.title = null;
+                },
+                .Image => |*value| {
                     value.*.url = self.tokenizer.bytes[token_url_start.start..token_url_end.start];
                     value.*.title = null;
                 },

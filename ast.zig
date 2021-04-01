@@ -36,7 +36,10 @@ pub const Node = struct {
 
         LinkRef: LinkData,
 
-        Image,  // inline in CommonMark - leaf block here
+        // inline in CommonMark - leaf block here
+        // TODO just store the pointer here and the ImageData just in the same arena
+        // oterwise the union is getting way too big
+        Image: struct { alt: []const u8, label: ?[]const u8, url: ?[]const u8, title: ?[]const u8 },
 
         Paragraph,
         BlankLine, // ?
@@ -127,7 +130,7 @@ pub inline fn can_hold(self: NodeKind, other: NodeKind) bool {
 pub inline fn children_allowed(self: NodeKind) bool {
     return switch (self) {
         .Undefined, .CodeSpan, .ThematicBreak, .FencedCode, .LinkRef,
-        .BlankLine, .Image, .Autolink, .HardLineBreak, .Text => false,
+        .BlankLine, .Autolink, .HardLineBreak, .Text => false,
         else => true,
     };
 }

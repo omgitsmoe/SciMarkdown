@@ -129,6 +129,22 @@ pub const HTMLGenerator = struct {
                         }
                     }
                 },
+                .Image => |img| {
+                    if (img.url) |url| {
+                        // TODO resolve references
+                        try self.html_buf.appendSlice("<img src=\"");
+                        try self.html_buf.appendSlice(url);
+                        try self.html_buf.appendSlice("\" alt=\"");
+                        try self.html_buf.appendSlice(img.alt);
+                        try self.html_buf.appendSlice("\"");
+                        if (img.title) |title| {
+                            try self.html_buf.appendSlice(" title=\"");
+                            try self.html_buf.appendSlice(title);
+                            try self.html_buf.appendSlice("\"");
+                        }
+                        try self.html_buf.appendSlice(" />");
+                    }
+                },
                 .HardLineBreak => try self.html_buf.appendSlice("<br/>\n"),
                 .Text => |text| {
                     if (node_info.data.first_child) |fc| {
