@@ -31,6 +31,7 @@ pub const HTMLGenerator = struct {
             \\<body>
         );
 
+        var in_loose_list = false;
         while (dfs.next()) |node_info| {
             // bug in zig compiler: if a switch prong (without {}) doesn't handle an error
             // the start of the switch is reported as ignoring the error
@@ -51,18 +52,22 @@ pub const HTMLGenerator = struct {
                     }
                     try self.html_buf.appendSlice(&hbuf);
                 },
-                .UnorderedList => {
+                .UnorderedList => |list| {
                     if (!node_info.is_end) {
+                        in_loose_list = if (list.loose) true else false;
                         try self.html_buf.appendSlice("<ul>\n");
                     } else {
                         try self.html_buf.appendSlice("</ul>\n");
+                        in_loose_list = HTMLGenerator.get_parents_list_loose_status(node_info.data);
                     }
                 },
-                .OrderedList => {
+                .OrderedList => |list| {
                     if (!node_info.is_end) {
+                        in_loose_list = if (list.loose) true else false;
                         try self.html_buf.appendSlice("<ol>\n");
                     } else {
                         try self.html_buf.appendSlice("</ol>\n");
+                        in_loose_list = HTMLGenerator.get_parents_list_loose_status(node_info.data);
                     }
                 },
                 .UnorderedListItem, .OrderedListItem => {
@@ -85,10 +90,12 @@ pub const HTMLGenerator = struct {
                     }
                 },
                 .Paragraph => {
-                    if (!node_info.is_end) {
-                        try self.html_buf.appendSlice("<p>\n");
-                    } else {
-                        try self.html_buf.appendSlice("</p>\n");
+                    if (in_loose_list) {
+                        if (!node_info.is_end) {
+                            try self.html_buf.appendSlice("<p>\n");
+                        } else {
+                            try self.html_buf.appendSlice("</p>\n");
+                        }
                     }
                 },
                 .Emphasis => {
@@ -159,5 +166,21 @@ pub const HTMLGenerator = struct {
 
         try self.html_buf.appendSlice("</body>\n</html>");
         return self.html_buf.toOwnedSlice();
+    }
+
+    /// assumes current_list.parent is not null
+    fn get_parents_list_loose_status(current_list: *Node) bool {
+        // restore parent list's loose status if there is one
+        return switch (current_list.parent.?.data) {
+            NodeKind.OrderedListItem => blk: {
+                // first parent is item, second is list itself
+                break :blk current_list.parent.?.parent.?.data.OrderedList.loose;
+            },
+            NodeKind.UnorderedListItem => blk: {
+                // first parent is item, second is list itself
+                break :blk current_list.parent.?.parent.?.data.UnorderedList.loose;
+            },
+            else => false,
+        };
     }
 };

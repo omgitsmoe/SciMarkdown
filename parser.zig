@@ -237,25 +237,41 @@ pub const Parser = struct {
                 //
                 // self.current_document is always open_blocks[0]
                 // container blocks can contain blank lines so we don't close them here
-                if (self.open_block_idx > 0 and
-                        self.peek_next_token().token_kind == TokenKind.Newline) {
-                    std.debug.print("ln:{}: Close block (all): {}\n",
-                        .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
-                    switch (self.get_last_block().data) {
-                        NodeKind.OrderedListItem, NodeKind.UnorderedListItem => {
-                            self.close_last_block();
-                            self.close_last_block();
-                        },
-                        else => {
-                            self.close_last_block();
+                if (self.open_block_idx > 0) {
+                    if (self.peek_next_token().token_kind == TokenKind.Newline) {
+                        std.debug.print("ln:{}: Close block (all): {}\n",
+                            .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
+                        switch (self.get_last_block().data) {
+                            NodeKind.OrderedListItem, NodeKind.UnorderedListItem => {
+                                self.close_last_block();
+                                self.close_last_block();
+                            },
+                            else => {
+                                self.close_last_block();
+                            }
+                        }
+                        self.eat_token();  // eat both \n
+                    } else if (!ast.is_container_block(self.get_last_block().data)) {
+                        std.debug.print("ln:{}: Close block: {}\n",
+                            .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
+                        self.close_last_block();
+                    } else {
+                        // blank line in a list -> makes the list loose
+                        var last_container_block = self.get_last_container_block();
+                        switch (last_container_block.data) {
+                            NodeKind.OrderedListItem => {
+                                std.debug.print("ln:{}: Blank line -> loose list\n",
+                                                .{ self.peek_token().line_nr });
+                                last_container_block.parent.?.data.OrderedList.loose = true;
+                            },
+                            NodeKind.UnorderedListItem => {
+                                std.debug.print("ln:{}: Blank line -> loose list\n",
+                                                .{ self.peek_token().line_nr });
+                                last_container_block.parent.?.data.UnorderedList.loose = true;
+                            },
+                            else => {},
                         }
                     }
-                    self.eat_token();  // eat both \n
-                } else if (self.open_block_idx > 0 and
-                           !ast.is_container_block(self.get_last_block().data)) {
-                    std.debug.print("ln:{}: Close block: {}\n",
-                        .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
-                    self.close_last_block();
                 }
 
                 self.eat_token();
@@ -674,7 +690,9 @@ pub const Parser = struct {
         // create new list if it can't continue
         if (!self.can_list_continue(NodeKind.OrderedListItem, start_token)) {
             list_node = try self.new_node(self.get_last_block());
-            list_node.data = .OrderedList;
+            list_node.data = .{
+                .OrderedList = .{ .loose = false },
+            };
             self.open_block(list_node);
         } else {
             list_node = self.get_last_block();
@@ -693,8 +711,6 @@ pub const Parser = struct {
 
     fn parse_unordered_list(self: *Parser, start_token: *Token) ParseError!void {
         try self.handle_open_blocks(NodeKind.UnorderedListItem);
-        // TODO figure out a good way (alternative to vanilla md) of how to determine
-        // if list should be loose or not
         // if one blank line is present in the contents of any of the list items
         // the list will be loose
 
@@ -702,7 +718,9 @@ pub const Parser = struct {
         // create new list if it can't continue
         if (!self.can_list_continue(NodeKind.UnorderedListItem, start_token)) {
             list_node = try self.new_node(self.get_last_container_block());
-            list_node.data = .UnorderedList;
+            list_node.data = .{
+                .UnorderedList = .{ .loose = false },
+            };
             self.open_block(list_node);
         } else {
             list_node = self.get_last_block();
