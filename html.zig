@@ -10,16 +10,33 @@ pub const HTMLGenerator = struct {
     allocator: *std.mem.Allocator,
     html_buf: std.ArrayList(u8),
     start_node: *Node,
+    label_ref_map: std.StringHashMap(*Node.LinkData),
 
-    pub fn init(allocator: *std.mem.Allocator, start_node: *Node) !HTMLGenerator {
+    pub const Error = error {
+        OutOfMemory,
+        ReferenceLabelNotFound,
+        FormatBufferTooSmall,
+    };
+
+    /// label_ref_map is taken from the parser, but HTMLGenerator doesn't take ownership
+    pub fn init(
+        allocator: *std.mem.Allocator,
+        start_node: *Node,
+        label_ref_map: std.StringHashMap(*Node.LinkData)
+    ) !HTMLGenerator {
         return HTMLGenerator{
             .allocator = allocator,
             .html_buf = std.ArrayList(u8).init(allocator),
             .start_node = start_node,
+            .label_ref_map = label_ref_map,
         };
     }
 
-    pub fn generate(self: *HTMLGenerator) ![]const u8 {
+    inline fn report_error(comptime err_msg: []const u8, args: anytype) void {
+        std.log.err(err_msg, args);
+    }
+
+    pub fn generate(self: *HTMLGenerator) Error![]const u8 {
         var dfs = DFS(Node, true).init(self.start_node);
 
         try self.html_buf.appendSlice(
@@ -44,7 +61,8 @@ pub const HTMLGenerator = struct {
                 .ThematicBreak => try self.html_buf.appendSlice("<hr/>\n"),
                 .Heading => |heading| {
                     var hbuf: [4]u8 = undefined;
-                    _ = try std.fmt.bufPrint(&hbuf, "h{}>\n", .{ heading.level });
+                    _ = std.fmt.bufPrint(&hbuf, "h{}>\n", .{ heading.level })
+                        catch return Error.FormatBufferTooSmall;
                     if (node_info.is_end) {
                         try self.html_buf.appendSlice("</");
                     } else {
@@ -125,15 +143,38 @@ pub const HTMLGenerator = struct {
                     try self.html_buf.appendSlice("</code>");
                 },
                 .Link => |link| {
+                    var link_url: []const u8 = undefined;
+                    var link_title: ?[]const u8 = undefined;
                     if (link.url) |url| {
-                        if (!node_info.is_end) {
-                            // TODO resolve references
-                            try self.html_buf.appendSlice("<a href=\"");
-                            try self.html_buf.appendSlice(url);
-                            try self.html_buf.appendSlice("\"/>");
+                        link_url = url;
+                        link_title = link.title;
+                    } else {
+                        // look up reference by label; must have one if url is null
+                        // returns optional ptr to entry
+                        const maybe_ref = self.label_ref_map.get(link.label.?);
+                        if (maybe_ref) |ref| {
+                            link_url = ref.url.?;
+                            link_title = ref.title;
                         } else {
-                            try self.html_buf.appendSlice("</a>");
+                            HTMLGenerator.report_error(
+                                "No reference definition could be found for label '{}'!\n",
+                                .{ link.label.? });
+                            return Error.ReferenceLabelNotFound;
                         }
+                    }
+
+                    if (!node_info.is_end) {
+                        try self.html_buf.appendSlice("<a href=\"");
+                        try self.html_buf.appendSlice(link_url);
+                        try self.html_buf.append('"');
+                        if (link_title) |title| {
+                            try self.html_buf.appendSlice("title=\"");
+                            try self.html_buf.appendSlice(title);
+                            try self.html_buf.append('"');
+                        }
+                        try self.html_buf.append('>');
+                    } else {
+                        try self.html_buf.appendSlice("</a>");
                     }
                 },
                 .Image => |img| {
@@ -180,7 +221,8 @@ pub const HTMLGenerator = struct {
                 // first parent is item, second is list itself
                 break :blk current_list.parent.?.parent.?.data.UnorderedList.blank_lines > 0;
             },
-            else => false,
+            // return true so paragraphs get rendered normally everywhere else
+            else => true,
         };
     }
 };

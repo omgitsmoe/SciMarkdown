@@ -13,6 +13,7 @@ pub const Parser = struct {
     allocator: *std.mem.Allocator,
     node_arena: std.heap.ArenaAllocator,
     string_arena: std.heap.ArenaAllocator,
+    label_ref_map: std.StringHashMap(*Node.LinkData),
 
     tokenizer: Tokenizer,
     // NOTE: ArrayList: pointers to items are __invalid__ after resizing operations!!
@@ -57,6 +58,7 @@ pub const Parser = struct {
             .allocator = allocator,
             .node_arena = std.heap.ArenaAllocator.init(allocator),
             .string_arena = std.heap.ArenaAllocator.init(allocator),
+            .label_ref_map = std.StringHashMap(*Node.LinkData).init(allocator),
 
             .tokenizer = try Tokenizer.init(allocator, filename),
             // TODO allocate a capacity for tokens with ensureCapacity based on filesize
@@ -87,6 +89,7 @@ pub const Parser = struct {
         self.node_arena.deinit();
         self.tokenizer.deinit();
         self.token_buf.deinit();
+        self.label_ref_map.deinit();
     }
 
     inline fn new_node(self: *Parser, parent: *Node) !*Node {
@@ -538,6 +541,19 @@ pub const Parser = struct {
                     },
                 };
                 self.open_block(reference_def);
+
+                // store entry in label_ref_map with the label as key and the *Node as value
+                // make sure we don't have a duplicate label!
+                const entry_found = try self.label_ref_map.getOrPut(reference_def.data.LinkRef.label.?);
+                // ^ result will be a struct with a pointer to the HashMap.Entry and a bool
+                // whether an existing value was found
+                if (entry_found.found_existing) {
+                    Parser.report_error("ln:{}: Duplicate reference label!\n", .{ self.peek_token().line_nr });
+                    return ParseError.SyntaxError;
+                } else {
+                    // actually write entry value (key was already written by getOrPut)
+                    entry_found.entry.*.value = &reference_def.data.LinkRef;
+                }
 
                 try self.parse_link_destination();
                 self.close_last_block();
@@ -1007,6 +1023,7 @@ pub const Parser = struct {
         self.open_block(link_node);
 
         const link_text_start_token = self.peek_token();
+        // TODO @CleanUp handle +-Indent
         while (try self.parse_inline(false)) {
             if (self.peek_token().token_kind == TokenKind.Close_bracket) {
                 const last_block = self.get_last_block();
@@ -1016,7 +1033,6 @@ pub const Parser = struct {
                         .{ self.peek_token().line_nr, @tagName(last_block.data) });
                     return ParseError.SyntaxError;
                 }
-                self.eat_token();
                 break;
             }
         }
@@ -1027,6 +1043,7 @@ pub const Parser = struct {
             return ParseError.SyntaxError;
         }
         const link_text_end = self.peek_token().start;
+        self.eat_token(); // eat ]
 
         var token = self.peek_token();
         if (token.token_kind == TokenKind.Open_bracket) {

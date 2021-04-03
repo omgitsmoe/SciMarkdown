@@ -35,7 +35,7 @@ pub fn mainArgs(allocator: *std.mem.Allocator, args: []const []const u8) !void {
     defer parser.deinit();
     try parser.parse();
 
-    var html_gen = try HTMLGenerator.init(allocator, parser.current_document);
+    var html_gen = try HTMLGenerator.init(allocator, parser.current_document, parser.label_ref_map);
     const html_out = try html_gen.generate();
     // std.debug.print("{}\n", .{ html_out });
 

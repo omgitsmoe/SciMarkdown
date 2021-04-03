@@ -144,6 +144,7 @@ Quote break.
 
 [I'm an inline-style link with title](https://www.google.com "Google's Homepage")
 
+%% reference labels are case-sensitive contrary to regular markdown
 [I'm a reference-style link][Arbitrary case-insensitive reference text]
 
 [I'm a relative reference to a repository file](../blob/master/LICENSE)
@@ -152,9 +153,10 @@ Quote break.
 
 Or leave it empty and use the [link text itself].
 
-URLs and URLs in angle brackets will automatically get turned into links. 
-http://www.example.com or <http://www.example.com> and sometimes 
-example.com (but not on Github, for example).
+%% removed in this markdown style
+%% URLs and URLs in angle brackets will automatically get turned into links. 
+%% http://www.example.com or <http://www.example.com> and sometimes 
+%% example.com (but not on Github, for example).
 
 Some text to show that the reference links can follow later.
 
@@ -162,7 +164,7 @@ Some text to show that the reference links can follow later.
 %% inline links, otherwise we'd have to try parsing it and then backtrack
 %% (since the first bracket for links needs to be parsed as inline (with emph, code span etc.)
 %%  instead of just as pure text)
-:[arbitrary case-insensitive reference text]: (https://www.mozilla.org)
+:[Arbitrary case-insensitive reference text]: (https://www.mozilla.org)
 :[1]: (http://slashdot.org)
 :[link text itself]: (http://www.reddit.com "Link title")
 
