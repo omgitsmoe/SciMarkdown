@@ -101,6 +101,8 @@ This is a normal paragraph %% and this is a comment
 
   test
 - other
+%% lists will continue with just one blank line between them if the list starters (here '-')
+%% are the same!
 
 - No indent
   - First indent

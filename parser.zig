@@ -631,9 +631,10 @@ pub const Parser = struct {
         // is the same as the list item indent
         // same -> close list since the new block start where the list item starter would
         //         and not the list item content
+        // check for maching blocks though so a list can still be continued
         switch (self.get_last_block().data) {
             .OrderedListItem, .UnorderedListItem => |item| {
-                if (item.indent == starter_column) {
+                if (item.indent == starter_column and self.get_last_block().data != new_block) {
                     // self.close_list(prev_line_blank);
                     self.close_list(prev_line_blank);
                 }
