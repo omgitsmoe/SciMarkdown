@@ -97,12 +97,15 @@ This is a normal paragraph %% and this is a comment
 %% * Unordered list can use asterisks
 - Or minuses
 + Or pluses
++ test
+
+  test
+- other
 
 - No indent
   - First indent
     - Second indent
 - Dropping two indents
-
 
 ## Blockquote
 

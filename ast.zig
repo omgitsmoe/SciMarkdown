@@ -18,7 +18,11 @@ pub const Node = struct {
 
     pub const LinkData = struct { label: ?[]const u8, url: ?[]const u8, title: ?[]const u8};
     pub const EmphData = struct { opener_token_kind: TokenKind };
-    pub const ListData = struct { loose: bool };
+    pub const ListData = struct { blank_lines: u32 };
+    /// indent: column that list item startes need to have in order to continue the list
+    ///         1. test
+    ///           - sublist
+    ///           ^ this is the indent of the sublist
     pub const ListItemData = struct { list_item_starter: TokenKind, indent: u16 };
     // tagged union
     pub const NodeData = union(enum) {

@@ -54,7 +54,7 @@ pub const HTMLGenerator = struct {
                 },
                 .UnorderedList => |list| {
                     if (!node_info.is_end) {
-                        in_loose_list = if (list.loose) true else false;
+                        in_loose_list = if (list.blank_lines > 0) true else false;
                         try self.html_buf.appendSlice("<ul>\n");
                     } else {
                         try self.html_buf.appendSlice("</ul>\n");
@@ -63,7 +63,7 @@ pub const HTMLGenerator = struct {
                 },
                 .OrderedList => |list| {
                     if (!node_info.is_end) {
-                        in_loose_list = if (list.loose) true else false;
+                        in_loose_list = if (list.blank_lines > 0) true else false;
                         try self.html_buf.appendSlice("<ol>\n");
                     } else {
                         try self.html_buf.appendSlice("</ol>\n");
@@ -174,11 +174,11 @@ pub const HTMLGenerator = struct {
         return switch (current_list.parent.?.data) {
             NodeKind.OrderedListItem => blk: {
                 // first parent is item, second is list itself
-                break :blk current_list.parent.?.parent.?.data.OrderedList.loose;
+                break :blk current_list.parent.?.parent.?.data.OrderedList.blank_lines > 0;
             },
             NodeKind.UnorderedListItem => blk: {
                 // first parent is item, second is list itself
-                break :blk current_list.parent.?.parent.?.data.UnorderedList.loose;
+                break :blk current_list.parent.?.parent.?.data.UnorderedList.blank_lines > 0;
             },
             else => false,
         };
