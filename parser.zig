@@ -970,11 +970,13 @@ pub const Parser = struct {
                 }
                 self.eat_token();
             },
-            TokenKind.Backtick => {
+            TokenKind.Backtick, TokenKind.Backtick_double => {
+                // if code span contains a ` you can use `` to start/end a code span
+                const delimiter = token.token_kind;
                 self.eat_token();
                 var ctoken = self.peek_token();
                 const code_span_start = ctoken;
-                while (ctoken.token_kind != TokenKind.Backtick) : ({
+                while (ctoken.token_kind != delimiter) : ({
                     // while continue expression (executed on every loop as well as when a 
                     // continue happens)
                     self.eat_token();

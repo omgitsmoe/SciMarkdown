@@ -37,6 +37,7 @@ pub const TokenKind = enum {
     Double_quote_triple,
     Single_quote,
     Backtick,
+    Backtick_double,
     Backtick_triple,
 
     Backslash,
@@ -91,7 +92,8 @@ pub const TokenKind = enum {
             .Double_quote_triple => "\"\"\"",
             .Single_quote => "'",
             .Backtick => "`",
-            .Backtick_triple => "```",
+            .Backtick_triple => "``",
+            .Backtick_double => "```",
 
             .Backslash => "\\",
 
@@ -441,14 +443,11 @@ pub const Tokenizer = struct {
                 '`' => blk: {
                     if (self.peek_next_byte() == @intCast(u8, '`')) {
                         self.prechecked_advance_to_next_byte();
-                        self.advance_to_next_byte();
-                        if (self.current_byte == @intCast(u8, '`')) {
+                        if (self.peek_next_byte() == @intCast(u8, '`')) {
+                            self.prechecked_advance_to_next_byte();
                             break :blk TokenKind.Backtick_triple;
                         } else {
-                            // TODO backtrack here or what other solutions are there?
-                            // currently just emitting a short .Text token for just the
-                            // two backticks atm
-                            break :blk TokenKind.Text;
+                            break :blk TokenKind.Backtick_double;
                         }
                     } else {
                         break :blk TokenKind.Backtick;

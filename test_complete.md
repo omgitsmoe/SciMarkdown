@@ -188,6 +188,8 @@ Reference-style:
 
 Inline `code` has `back-ticks around` it.
 
+If a code span would contain a back-tick you can use two back-ticks instead:
+``code with ` can't end on `! ``
 
 ```javascript
 var s = "JavaScript syntax highlighting";
