@@ -61,6 +61,8 @@ Normal text with\_underscore and aster\*sk
 
 Strikethrough uses two tildes. ~~Scratch this.~~
 
+H~2~O is a liquid.  2^10^ is 1024.
+
 ## Comments
 
 %% This is a comment
@@ -102,7 +104,7 @@ This is a normal paragraph %% and this is a comment
   test
 - other
 %% lists will continue with just one blank line between them if the list starters (here '-')
-%% are the same!
+%% are the same! but this will make them loose! each list item text starts a paragraph
 
 - No indent
   - First indent
@@ -241,11 +243,11 @@ Three or more hyphens
 
 ---
 
-%% ***
+%% \*\*\*
 
 %% Asterisks
 
-%% ___
+%% \_\_\_
 
 %% Underscores
 
@@ -258,3 +260,39 @@ This line is separated from the one above by two newlines, so it will be a *sepa
 
 This line is also a separate paragraph, but...
 This line is only separated by a single newline or space, so it's a separate line in the *same paragraph*.
+
+
+## Citations
+
+%% Markdown citations go inside square brackets and are separated by semicolons. Each citation must
+%% have a key, composed of ‘@’ + the citation identifier from the database, and may optionally have a
+%% prefix, a locator, and a suffix.
+%% pandoc comparison:
+%% Blah blah [see @doe99, pp. 33-35; also @smith04, chap. 1].
+%% 
+%% Blah blah [@doe99, pp. 33-35, 38-39 and *passim*].
+%% 
+%% Blah blah [@smith04; @doe99].
+%% 
+%% Omit author name: Smith says blah [-@smith04].
+%% 
+%% In-text citation: @smith04 says blah.
+%%
+%% With locator: @smith04 [p. 33] says blah.
+Blah blah @cite(doe99, pre=see, loc=pp. 33-35, post=and *passim* & smith04, pre=also, loc=chap. 1)
+
+%% cite only for one citation?
+%% Blah blah @cites(@cite(doe99, pre=see, loc=pp. 33-35, post=and *passim*),
+%% @cite(smith04, pre=also, loc=chap. 1))
+
+Blah blah @cites(@cite(doe99, loc=pp. 33-35), @cite(smith04))
+
+Blah blah @cite(doe99, loc=pp. 33-35\, 38-39 and *passim*).
+
+Blah blah @cite(smith04 & doe99).
+
+Omit author name: Smith says blah @cite(-smith04).
+
+In-text citation: @textcite(smith04) says blah.
+
+With locator: @textcite(smith04, loc=p. 33) says blah.

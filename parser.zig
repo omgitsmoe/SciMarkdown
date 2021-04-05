@@ -941,6 +941,35 @@ pub const Parser = struct {
                 }
                 self.eat_token();
             },
+            TokenKind.Caret => {
+                // TODO pandoc doesn't allow spaces/newlines inside super/subscript blocks
+                // but they can be backslash escaped
+                // do this as well? or just make ppl escape the ^/~ instead of spaces inside?
+                const last_block = self.get_last_block();
+                if (last_block.data == NodeKind.Superscript) {
+                    std.debug.print("ln:{}: Close Superscript\n", .{ self.peek_token().line_nr });
+                    self.close_last_block();
+                } else {
+                    var superscript_node = try self.new_node(self.get_last_block());
+                    superscript_node.data = .Superscript;
+                    std.debug.print("ln:{}: Open superscript\n", .{ self.peek_token().line_nr });
+                    self.open_block(superscript_node);
+                }
+                self.eat_token();
+            },
+            TokenKind.Tilde => {
+                const last_block = self.get_last_block();
+                if (last_block.data == NodeKind.Subscript) {
+                    std.debug.print("ln:{}: Close Subscript\n", .{ self.peek_token().line_nr });
+                    self.close_last_block();
+                } else {
+                    var subscript_node = try self.new_node(self.get_last_block());
+                    subscript_node.data = .Subscript;
+                    std.debug.print("ln:{}: Open subscript\n", .{ self.peek_token().line_nr });
+                    self.open_block(subscript_node);
+                }
+                self.eat_token();
+            },
             TokenKind.Backtick => {
                 self.eat_token();
                 var ctoken = self.peek_token();

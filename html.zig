@@ -48,7 +48,7 @@ pub const HTMLGenerator = struct {
             \\<body>
         );
 
-        var in_loose_list = false;
+        var in_compact_list = false;
         while (dfs.next()) |node_info| {
             // bug in zig compiler: if a switch prong (without {}) doesn't handle an error
             // the start of the switch is reported as ignoring the error
@@ -72,20 +72,20 @@ pub const HTMLGenerator = struct {
                 },
                 .UnorderedList => |list| {
                     if (!node_info.is_end) {
-                        in_loose_list = if (list.blank_lines > 0) true else false;
+                        in_compact_list = if (list.blank_lines > 0) false else true;
                         try self.html_buf.appendSlice("<ul>\n");
                     } else {
                         try self.html_buf.appendSlice("</ul>\n");
-                        in_loose_list = HTMLGenerator.get_parents_list_loose_status(node_info.data);
+                        in_compact_list = HTMLGenerator.get_parents_list_compact_status(node_info.data);
                     }
                 },
                 .OrderedList => |list| {
                     if (!node_info.is_end) {
-                        in_loose_list = if (list.blank_lines > 0) true else false;
+                        in_compact_list = if (list.blank_lines > 0) false else true;
                         try self.html_buf.appendSlice("<ol>\n");
                     } else {
                         try self.html_buf.appendSlice("</ol>\n");
-                        in_loose_list = HTMLGenerator.get_parents_list_loose_status(node_info.data);
+                        in_compact_list = HTMLGenerator.get_parents_list_compact_status(node_info.data);
                     }
                 },
                 .UnorderedListItem, .OrderedListItem => {
@@ -108,7 +108,7 @@ pub const HTMLGenerator = struct {
                     }
                 },
                 .Paragraph => {
-                    if (in_loose_list) {
+                    if (!in_compact_list) {
                         if (!node_info.is_end) {
                             try self.html_buf.appendSlice("<p>\n");
                         } else {
@@ -135,6 +135,20 @@ pub const HTMLGenerator = struct {
                         try self.html_buf.appendSlice("<strike>");
                     } else {
                         try self.html_buf.appendSlice("</strike>");
+                    }
+                },
+                .Superscript => {
+                    if (!node_info.is_end) {
+                        try self.html_buf.appendSlice("<sup>");
+                    } else {
+                        try self.html_buf.appendSlice("</sup>");
+                    }
+                },
+                .Subscript => {
+                    if (!node_info.is_end) {
+                        try self.html_buf.appendSlice("<sub>");
+                    } else {
+                        try self.html_buf.appendSlice("</sub>");
                     }
                 },
                 .CodeSpan => |code| {
@@ -210,19 +224,19 @@ pub const HTMLGenerator = struct {
     }
 
     /// assumes current_list.parent is not null
-    fn get_parents_list_loose_status(current_list: *Node) bool {
-        // restore parent list's loose status if there is one
+    fn get_parents_list_compact_status(current_list: *Node) bool {
+        // restore parent list's compact status if there is one
         return switch (current_list.parent.?.data) {
             NodeKind.OrderedListItem => blk: {
                 // first parent is item, second is list itself
-                break :blk current_list.parent.?.parent.?.data.OrderedList.blank_lines > 0;
+                break :blk current_list.parent.?.parent.?.data.OrderedList.blank_lines == 0;
             },
             NodeKind.UnorderedListItem => blk: {
                 // first parent is item, second is list itself
-                break :blk current_list.parent.?.parent.?.data.UnorderedList.blank_lines > 0;
+                break :blk current_list.parent.?.parent.?.data.UnorderedList.blank_lines == 0;
             },
             // return true so paragraphs get rendered normally everywhere else
-            else => true,
+            else => false,
         };
     }
 };
