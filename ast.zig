@@ -38,6 +38,7 @@ pub const Node = struct {
         Heading: struct { level: u8 },
 
         FencedCode: struct { language_name: []const u8, code: []const u8 },
+        MathMultiline: struct { text: []const u8 },
 
         LinkRef: LinkData,
 
@@ -64,6 +65,7 @@ pub const Node = struct {
 
         // inline
         CodeSpan: struct { text: []const u8 },
+        MathInline: struct { text: []const u8 },
         Emphasis: EmphData,
         StrongEmphasis: EmphData,
         Strikethrough,
@@ -112,7 +114,8 @@ pub inline fn is_container_block(self: NodeKind) bool {
 
 pub inline fn is_leaf_block(self: NodeKind) bool {
     return switch (self) {
-        .ThematicBreak, .Heading, .FencedCode, .LinkRef, .Paragraph, .BlankLine, .Image => true,
+        .ThematicBreak, .Heading, .FencedCode, .LinkRef, .Paragraph,
+        .BlankLine, .Image, .MathMultiline => true,
         else => false,
     };
 }
@@ -120,7 +123,7 @@ pub inline fn is_leaf_block(self: NodeKind) bool {
 pub inline fn is_inline(self: NodeKind) bool {
     return switch (self) {
         .CodeSpan, .Emphasis, .StrongEmphasis, .Strikethrough, .Link,
-        .HardLineBreak, .Text, .Superscript, .Subscript => true,
+        .HardLineBreak, .Text, .Superscript, .Subscript, .MathInline => true,
         else => false,
     };
 }
@@ -136,7 +139,7 @@ pub inline fn can_hold(self: NodeKind, other: NodeKind) bool {
 pub inline fn children_allowed(self: NodeKind) bool {
     return switch (self) {
         .Undefined, .CodeSpan, .ThematicBreak, .FencedCode, .LinkRef,
-        .BlankLine, .HardLineBreak, .Text => false,
+        .BlankLine, .HardLineBreak, .Text, .MathInline => false,
         else => true,
     };
 }

@@ -487,6 +487,37 @@ pub const Parser = struct {
                 try self.parse_code_block();
             },
 
+            TokenKind.Dollar_double => {
+                try self.handle_open_blocks(
+                    NodeKind.MathMultiline, self.peek_token().column, prev_line_blank);
+
+                self.eat_token();
+                var ctoken = self.peek_token();
+                const math_start = ctoken;
+                while (ctoken.token_kind != TokenKind.Dollar_double) : ({
+                    self.eat_token();
+                    ctoken = self.peek_token();
+                }) {
+                    if (ctoken.token_kind == TokenKind.Eof) {
+                        Parser.report_error(
+                            "ln:{}: Encountered end of file inside math environment ($$...$$)",
+                            .{ math_start.line_nr });
+                        return ParseError.SyntaxError;
+                    }
+                }
+
+                const math_node = try self.new_node(self.get_last_block());
+                math_node.data = .{
+                    .MathMultiline = .{ 
+                        .text = self.tokenizer.bytes[math_start.start..self.peek_token().start]
+                    }
+                };
+                self.eat_token();  // eat closing $$
+
+                std.debug.print("ln:{}: Math env: $${}$$\n",
+                    .{ math_start.line_nr, math_node.data.MathMultiline.text });
+            },
+
             TokenKind.Colon_open_bracket => {
                 try self.handle_open_blocks(NodeKind.LinkRef, self.peek_token().column, prev_line_blank);
 
@@ -1001,46 +1032,86 @@ pub const Parser = struct {
                 std.debug.print("ln:{}: Code span: `{}`\n",
                     .{ code_span_start.line_nr, code_span.data.CodeSpan.text });
             },
+            TokenKind.Dollar => {
+                //  check if a digit follows immediately after and then just parse it as text
+                //  so often used $xx for prices doesn't need to be escaped (how pandoc does it)
+                if (self.peek_next_token().token_kind == TokenKind.Digits) {
+                    try self.parse_text(token);
+                    return true;
+                }
+                self.eat_token();
+
+                var ctoken = self.peek_token();
+                const inline_math_start = ctoken;
+                while (ctoken.token_kind != TokenKind.Dollar) : ({
+                    // while continue expression (executed on every loop as well as when a 
+                    // continue happens)
+                    self.eat_token();
+                    ctoken = self.peek_token();
+                }) {
+                    if (ctoken.token_kind == TokenKind.Eof) {
+                        Parser.report_error(
+                            "ln:{}: Encountered end of file inside inline math ($...$)",
+                            .{ inline_math_start.line_nr });
+                        return ParseError.SyntaxError;
+                    }
+                }
+
+                const math_node = try self.new_node(self.get_last_block());
+                math_node.data = .{
+                    .MathInline = .{ 
+                        .text = self.tokenizer.bytes[inline_math_start.start..self.peek_token().start]
+                    }
+                };
+                self.eat_token();  // eat closing $
+
+                std.debug.print("ln:{}: Math span: `{}`\n",
+                    .{ inline_math_start.line_nr, math_node.data.MathInline.text });
+            },
             TokenKind.Open_bracket => {
                 try self.parse_link();
             },
             else => {
-                if (self.last_text_node) |continue_text| {
-                    // enlarge slice by directly manipulating the length (which is allowed in zig)
-                    // TODO backslash escaped text will result in faulty text, since the
-                    // backslash is included but the escaped text isn't and this as a whole ends
-                    // up making the text buffer too narrow
-                    continue_text.data.Text.text.len += token.end - token.start;
-                    // const tok_text = if (token.token_kind != TokenKind.Decrease_indent) token.text(self.tokenizer.bytes) else token.token_kind.name();
-                    // std.debug.print("Tok kind {} text: {}\n", .{ token.token_kind,  tok_text });
-                    // std.debug.print("ln:{}: Enlarged text node: {}\n",
-                    //     .{ token.line_nr, continue_text.data.Text.text });
-                } else {
-                    const parent = self.get_last_block();
-                    var text_node = try self.new_node(parent);
-                    text_node.data = .{
-                        .Text = .{ .text =  self.tokenizer.bytes[token.start..token.end] },
-                    };
-                    self.last_text_node = text_node;
-
-                    // std.debug.print("Text node content: '''{}'''\n", .{ text_node.data.Text.text });
-                }
-                self.eat_token();
-
-                // TODO @Robustness? invalidate last_text_node since Newline will
-                // be consumed by caller and will most likely never reach parse_inline
-                // the swallowed newline will thus not be added to the text slice
-                // and following continuation texts that get added will be off by one
-                // alternative is to add the newline here instead but that might not be
-                // wanted all the time
-                if (self.peek_token().token_kind == TokenKind.Newline) {
-                    // std.debug.print("ln:{}: Reset last_text_node due to newline\n",
-                    //     .{ self.peek_token().line_nr });
-                    self.last_text_node = null;
-                }
+                try self.parse_text(token);
             },
         }
         return true;
+    }
+
+    inline fn parse_text(self: *Parser, token: *Token) ParseError!void {
+        if (self.last_text_node) |continue_text| {
+            // enlarge slice by directly manipulating the length (which is allowed in zig)
+            // TODO backslash escaped text will result in faulty text, since the
+            // backslash is included but the escaped text isn't and this as a whole ends
+            // up making the text buffer too narrow
+            continue_text.data.Text.text.len += token.end - token.start;
+            // const tok_text = if (token.token_kind != TokenKind.Decrease_indent) token.text(self.tokenizer.bytes) else token.token_kind.name();
+            // std.debug.print("Tok kind {} text: {}\n", .{ token.token_kind,  tok_text });
+            // std.debug.print("ln:{}: Enlarged text node: {}\n",
+            //     .{ token.line_nr, continue_text.data.Text.text });
+        } else {
+            const parent = self.get_last_block();
+            var text_node = try self.new_node(parent);
+            text_node.data = .{
+                .Text = .{ .text =  self.tokenizer.bytes[token.start..token.end] },
+            };
+            self.last_text_node = text_node;
+
+            // std.debug.print("Text node content: '''{}'''\n", .{ text_node.data.Text.text });
+        }
+        self.eat_token();
+
+        // TODO @Robustness? invalidate last_text_node since Newline will
+        // be consumed by caller and will most likely never reach parse_inline
+        // the swallowed newline will thus not be added to the text slice
+        // and following continuation texts that get added will be off by one
+        // alternative is to add the newline here instead but that might not be
+        // wanted all the time
+        if (self.peek_token().token_kind == TokenKind.Newline) {
+            // std.debug.print("ln:{}: Reset last_text_node due to newline\n",
+            //     .{ self.peek_token().line_nr });
+            self.last_text_node = null;
+        }
     }
 
     fn parse_link(self: *Parser) ParseError!void {

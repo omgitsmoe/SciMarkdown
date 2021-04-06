@@ -20,6 +20,9 @@ pub const TokenKind = enum {
     Colon_open_bracket,
     Bar,
     Caret,
+    // TODO rename tokens to their function if they only have one single functionality?
+    Dollar,
+    Dollar_double,
 
     Exclamation_open_bracket,  // ![
 
@@ -75,6 +78,8 @@ pub const TokenKind = enum {
             .Colon_open_bracket => ":[",
             .Bar => "|",
             .Caret => "^",
+            .Dollar => "$",
+            .Dollar_double => "$$",
 
             .Exclamation_open_bracket => "![",  // ![
 
@@ -403,6 +408,14 @@ pub const Tokenizer = struct {
                 },
                 '|' => .Bar,
                 '^' => .Caret,
+                '$' => blk: {
+                    if (self.peek_next_byte() == @as(u8, '$')) {
+                        self.prechecked_advance_to_next_byte();
+                        break :blk TokenKind.Dollar_double;
+                    } else {
+                        break :blk TokenKind.Dollar;
+                    }
+                },
                 '!' => blk: {
                     if (self.peek_next_byte() == @as(u8, '[')) {
                         self.prechecked_advance_to_next_byte();
@@ -506,7 +519,7 @@ pub const Tokenizer = struct {
                     while (self.peek_next_byte()) |next_byte| : (self.prechecked_advance_to_next_byte()) {
                         switch (next_byte) {
                             ' ', '\t', '\r', '\n', '_', '*', '/', '\\', '`',
-                            '<', '[', ']', ')', '"', '~', '^' => break,
+                            '<', '[', ']', ')', '"', '~', '^', '$' => break,
                             else => {},
                         }
                     }
