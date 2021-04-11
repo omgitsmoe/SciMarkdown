@@ -6,3 +6,9 @@ research/
 *.exe
 *.pdb
 .vs/
+zig-cache/
+build/
+_compiler_tests/
+tags
+# for now don't track 3rd party deps
+vendor/
