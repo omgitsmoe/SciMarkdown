@@ -197,19 +197,22 @@ alert(s);
 ```
 
 ```python
-%% same comment token as we have
 s = "Python syntax highlighting"
+if s == "":
+    if len(s.split()) > 3:
+        print(s)
+else:
+    print(s)
+```
+
+```
+%% same comment token as we have
+No language indicated, so no syntax highlighting. 
+But let's throw in a <b>tag</b>.
 %% test that indents get printed
 if s == "":
     if len(s.split()) > 3:
         print s
-else:
-    print s
-```
-
-```
-No language indicated, so no syntax highlighting. 
-But let's throw in a <b>tag</b>.
 ```
 
 

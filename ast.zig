@@ -3,6 +3,8 @@ const std = @import("std");
 const tokenizer = @import("tokenizer.zig");
 const TokenKind = tokenizer.TokenKind;
 
+const Language = @import("code_chunks.zig").Language;
+
 // meta.TagType gets union's enum tag type (by using @typeInfo(T).tag_type)
 pub const NodeKind = std.meta.TagType(Node.NodeData);
 pub const Node = struct {
@@ -19,6 +21,7 @@ pub const Node = struct {
     pub const LinkData = struct { label: ?[]const u8, url: ?[]const u8, title: ?[]const u8};
     pub const EmphData = struct { opener_token_kind: TokenKind };
     pub const ListData = struct { blank_lines: u32 };
+    pub const CodeData = struct { language: Language, code: []const u8 };
     /// indent: column that list item startes need to have in order to continue the list
     ///         1. test
     ///           - sublist
@@ -37,7 +40,7 @@ pub const Node = struct {
 
         Heading: struct { level: u8 },
 
-        FencedCode: struct { language_name: []const u8, code: []const u8 },
+        FencedCode: CodeData,
         MathMultiline: struct { text: []const u8 },
 
         LinkRef: LinkData,

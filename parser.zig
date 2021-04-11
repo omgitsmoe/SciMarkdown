@@ -9,6 +9,9 @@ const ast = @import("ast.zig");
 const Node = ast.Node;
 const NodeKind = ast.NodeKind;
 
+const code_chunks = @import("code_chunks.zig");
+const Language = code_chunks.Language;
+
 pub const Parser = struct {
     allocator: *std.mem.Allocator,
     node_arena: std.heap.ArenaAllocator,
@@ -469,20 +472,19 @@ pub const Parser = struct {
                 const lang_name_end = self.peek_token().start;
                 self.eat_token();
 
+
                 var code_node = try self.new_node(self.get_last_block());
                 code_node.data = .{
                     .FencedCode = .{
-                        .language_name =
-                            if (lang_name_start != lang_name_end)
-                                self.tokenizer.bytes[lang_name_start..lang_name_end]
-                            else "",
+                        .language = Language.match(
+                            self.tokenizer.bytes[lang_name_start..lang_name_end]),
                         .code = undefined,
                     },
                 };
                 self.open_block(code_node);
 
                 std.debug.print("Found code block ln{}: lang_name {}\n",
-                    .{ self.peek_token().line_nr, code_node.data.FencedCode.language_name });
+                    .{ self.peek_token().line_nr, @tagName(code_node.data.FencedCode.language) });
 
                 try self.parse_code_block();
             },
@@ -1002,6 +1004,7 @@ pub const Parser = struct {
                 self.eat_token();
             },
             TokenKind.Backtick, TokenKind.Backtick_double => {
+                // TODO lang name
                 // if code span contains a ` you can use `` to start/end a code span
                 const delimiter = token.token_kind;
                 self.eat_token();
@@ -1226,12 +1229,7 @@ pub const Parser = struct {
                     line_start = false;
                 }
 
-                switch (current_token.token_kind) {
-                    TokenKind.Text, TokenKind.Comment => 
-                        try string_buf.appendSlice(
-                            self.tokenizer.bytes[current_token.start..current_token.end]),
-                    else => try string_buf.appendSlice(current_token.token_kind.name()),
-                }
+                try string_buf.appendSlice(current_token.text(self.tokenizer.bytes));
             }
 
             self.eat_token();

@@ -2,6 +2,7 @@ const std = @import("std");
 
 const Parser = @import("parser.zig").Parser;
 const HTMLGenerator = @import("html.zig").HTMLGenerator;
+const CodeRunner = @import("code_chunks.zig").CodeRunner;
 
 pub fn main() !void {
     // gpa optimized for safety over performance; can detect leaks, double-free and use-after-free
@@ -34,6 +35,10 @@ pub fn mainArgs(allocator: *std.mem.Allocator, args: []const []const u8) !void {
     var parser: Parser = try Parser.init(allocator, root_file_name);
     defer parser.deinit();
     try parser.parse();
+
+    var code_runner = try CodeRunner.init(allocator, .Python, parser.current_document);
+    defer code_runner.deinit();
+    try code_runner.run();
 
     var html_gen = try HTMLGenerator.init(allocator, parser.current_document, parser.label_ref_map);
     const html_out = try html_gen.generate();
