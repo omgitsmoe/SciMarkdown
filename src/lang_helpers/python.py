@@ -3,14 +3,6 @@ import os
 import struct
 
 
-# set up matplotlib to use a non-interactive backend
-# using an envvar has higher priority than the matplotlibrc
-# works for matplotlib >= 1.5
-# the agg backend will write png images to stdout even if plt.show() is called
-if not os.environ.get("MPLBACKEND"):
-    os.environ["MPLBACKEND"] = 'agg'
-
-
 class BufferedIOHelper:
     def __init__(self, text_io):
         self.text_io = text_io
@@ -43,6 +35,8 @@ class BufferedIOHelper:
             for binary_data in self.buffer:
                 stdio.write(binary_data)
             stdio.flush()
+
+        self.buffer.clear()
 
 
 # replace out/err with our version that waits till real_flush is called

@@ -117,16 +117,13 @@ pub const CodeRunner = struct {
     }
 
     pub fn run(self: *CodeRunner) !void {
-        // caller owns result.stdout and result.stderr memory
-        // can't write to stdin this way
-        // const result = try std.ChildProcess.exec(.{
-        //     .allocator = self.code_datas.allocator,
-        //     .argv = &[_][]const u8{ "python" },
-        //     .max_output_bytes = 1_000_000,
-        // });
         const allocator = &self.out_buf.allocator;
-        self.runner = try std.ChildProcess.init(
-            &[_][]const u8{"python"}, allocator);
+        const cmd = switch (self.lang) {
+            .Python => &[_][]const u8{"python"},
+            .R => &[_][]const u8{"D:\\Programs\\R-4.0.2\\bin\\R.exe", "--save", "--quiet", "--no-echo"},
+            else => return,
+        };
+        self.runner = try std.ChildProcess.init(cmd, allocator);
         self.runner.stdin_behavior = .Pipe;
         self.runner.stdout_behavior = .Pipe;
         self.runner.stderr_behavior = .Pipe;
@@ -135,24 +132,60 @@ pub const CodeRunner = struct {
         try self.runner.spawn();
 
         // write program code to stdin
-        // TODO close stdin or sth?; as it is right now we lock on waiting for the python interpreter
         try self.runner.stdin.?.writer().writeAll(self.merged_code.items);
         self.runner.stdin.?.close();
+        // has to be set to null otherwise the ChildProcess tries to close it again
+        // and hits unreachable code
         self.runner.stdin = null;
-        // doesn't work try self.runner.stdin.?.writer().writeByte(0);
-        // closing stdin also doesn't work since the ChildProcess tries closing it later which
-        // causes an error
-        // self.runner.stdin.?.close();
 
-        const stdout = try self.runner.stdout.?.reader().readAllAlloc(allocator, 50 * 1024);
+        std.debug.print("Done writing to stdin!\n", .{});
+
+        // might deadlock due to https://github.com/ziglang/zig/issues/6343
+        // weirdly only WindowsTerminal seems to have a problem with it and stops
+        // responding, cmd.exe works fine as does running it in a debugger
+        const stdout = try self.runner.stdout.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
         errdefer allocator.free(stdout);
-        const stderr = try self.runner.stderr.?.reader().readAllAlloc(allocator, 50 * 1024);
+        std.debug.print("Done reading from stdout!\n", .{});
+        const stderr = try self.runner.stderr.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
         errdefer allocator.free(stderr);
+        std.debug.print("Done reading from stderr!\n", .{});
 
         _ = try self.runner.wait();
+        std.debug.print("Done waiting on child!\n", .{});
 
-        // skip first 4 bytes that contain chunk out length
-        std.debug.print("\nOUT:\n{}----------\n", .{ stdout[4..] });
-        std.debug.print("\nERR:\n{}----------\n", .{ stderr });
+        self.assign_output_to_nodes(stdout, false);
+        self.assign_output_to_nodes(stderr, true);
+    }
+
+
+    fn assign_output_to_nodes(self: *CodeRunner, bytes: []const u8, comptime is_err: bool) void {
+        var i: u32 = 0;
+        var code_chunk: u16 = 0;
+        while (i < bytes.len) {
+            // first 4 bytes that contain chunk out length
+            // const chunk_out_len = std.mem.readIntNative(u32, @ptrCast(*const [4]u8, &stdout[i]));
+            // const chunk_out_len = std.mem.bytesToValue(u32, @ptrCast(*const [4]u8, &stdout[i]));
+            // bytes slice has alignemnt of 1, casting to *u32 means changing alignment to 4
+            // but only higher aligments coerce to lower ones so we have to use an alignCast
+            // (which has a safety check in debug builds)
+            // below errors out with "incorrect alignment" (unsure) since the []u8 is 1-aligned
+            // and u32 is 4-aligned
+            // const chunk_out_len = @ptrCast(*const u32, @alignCast(@alignOf(u32), &stdout[i])).*;
+            // just specify that the *u32 is 1-aligned
+            const chunk_out_len = @ptrCast(*align(1)const u32, &bytes[i]).*;
+            var chunk_out: ?[]const u8 = null;
+            if (chunk_out_len > 0) {
+                chunk_out = bytes[i+4..i+4+chunk_out_len];
+                std.debug.print("\nOUT:\n'''{}'''\n----------\n", .{ chunk_out });
+            }
+            i += 4 + chunk_out_len;
+
+            if (!is_err) {
+                self.code_datas.items[code_chunk].stdout = chunk_out;
+            } else {
+                self.code_datas.items[code_chunk].stderr = chunk_out;
+            }
+            code_chunk += 1;
+        }
     }
 };

@@ -205,6 +205,18 @@ else:
     print(s)
 ```
 
+```python
+import matplotlib.pyplot as plt
+plt.plot([1, 2, 3, 4])
+plt.ylabel('some numbers')
+# will just show the interactive window but won't automatically save the output
+# like you may be used to with e.g. jupyter notebook
+# plt.show()
+# using plt.savefig etc. is preferred here, since better formats that are more
+# suitable for publishing can be used etc.
+print("second print")
+```
+
 ```
 %% same comment token as we have
 No language indicated, so no syntax highlighting. 

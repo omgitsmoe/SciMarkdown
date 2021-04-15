@@ -100,6 +100,19 @@ pub const HTMLGenerator = struct {
                     try self.html_buf.appendSlice("<pre><code>\n");
                     try self.html_buf.appendSlice(code.code);
                     try self.html_buf.appendSlice("</code></pre>\n");
+
+                    if (code.stdout) |out| {
+                        try self.html_buf.appendSlice("Output:");
+                        try self.html_buf.appendSlice("<pre>\n");
+                        try self.html_buf.appendSlice(out);
+                        try self.html_buf.appendSlice("</pre>\n");
+                    }
+                    if (code.stderr) |err| {
+                        try self.html_buf.appendSlice("Warnings:");
+                        try self.html_buf.appendSlice("<pre>\n");
+                        try self.html_buf.appendSlice(err);
+                        try self.html_buf.appendSlice("</pre>\n");
+                    }
                 },
                 .MathInline => |math| {
                     // \(...\) are the default MathJax inline delimiters instead of $...$
