@@ -2,7 +2,13 @@ import sys
 import os
 import struct
 
-from io import TextIOWrapper
+
+# set up matplotlib to use a non-interactive backend
+# using an envvar has higher priority than the matplotlibrc
+# works for matplotlib >= 1.5
+# the agg backend will write png images to stdout even if plt.show() is called
+if not os.environ.get("MPLBACKEND"):
+    os.environ["MPLBACKEND"] = 'agg'
 
 
 class BufferedIOHelper:
@@ -13,11 +19,13 @@ class BufferedIOHelper:
     def write(self, s):
         # since we use stdout in binary mode anyway encode the string
         # (need to anyway to get the length in bytes)
-        char_len = len(s)
-        s = s.encode('utf-8')
-        self.buffer.append(s)
+        if type(s) is bytes:
+            b = s
+        else:
+            b = s.encode('utf-8')
+        self.buffer.append(b)
         # don't know if this must return length in chars?
-        return char_len
+        return len(s)
 
     def flush(self):
         # nop
@@ -32,8 +40,8 @@ class BufferedIOHelper:
             stdio.write(struct.pack('L', sum(len(s) for s in self.buffer)))
             stdio.flush()
 
-            for binary_string in self.buffer:
-                stdio.write(binary_string)
+            for binary_data in self.buffer:
+                stdio.write(binary_data)
             stdio.flush()
 
 
