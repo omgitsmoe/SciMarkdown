@@ -24,6 +24,7 @@ pub fn main() !void {
         allocator,
         2 * 1024 * 1024,  // max_size 2MiB, returns error.StreamTooLong if file is larger
     );
+    defer allocator.free(contents);
 
     var bp = try BibParser.init(allocator, "", contents);
     var bib = try bp.parse();
@@ -35,6 +36,7 @@ pub const BibParser = struct {
     bib: Bibliography,
     idx: u32,
     bytes: []const u8,
+    allocator: *std.mem.Allocator,
 
     const Error = error {
         SyntaxError,
@@ -52,6 +54,7 @@ pub const BibParser = struct {
             },
             .idx = 0,
             .bytes = bytes,
+            .allocator = allocator,
         };
         return parser;
     }
@@ -88,7 +91,39 @@ pub const BibParser = struct {
         }
     }
 
-    inline fn next(self: *BibParser) ?u8 {
+    fn eat_name(self: *BibParser) Error!void {
+        var byte = self.peek_byte();
+        while (true) {
+            switch (byte) {
+                // this is what btparse defines as name, but are that many special chars allowed?
+                // biber disallows " # ' ( ) , = { } %
+                'a'...'z', 'A'...'Z', '0'...'9',
+                '!', '$', '*', '+', '-', '.', '/', ':',
+                ';', '<', '>', '?', '[', ']', '^', '_', '`', '|' => {},
+                else => break,
+            }
+            self.advance_to_next_byte() catch {
+                BibParser.report_error("Reached EOF while consuming name!\n", .{});
+                return Error.EndOfFile;
+            };
+            byte = self.peek_byte();
+        }
+    }
+
+    /// does not advance the idx
+    inline fn require_byte(self: *BibParser, byte: u8) Error!void {
+        if (self.peek_byte() != byte) {
+            BibParser.report_error("Expected '{c}' got '{c}'!\n", .{ byte, self.peek_byte() });
+            return Error.SyntaxError;
+        }
+    }
+
+    inline fn eat_byte(self: *BibParser, byte: u8) Error!void {
+        try self.require_byte(byte);
+        try self.advance_to_next_byte();
+    }
+
+    fn next(self: *BibParser) ?u8 {
         if (self.idx + 1 < self.bytes.len) {
             self.idx += 1;
             var byte = self.bytes[self.idx];
@@ -175,17 +210,27 @@ pub const BibParser = struct {
         }
         // convert to lower-case to match with enum tagNames
         const lowercased = try std.ascii.allocLowerString(
-            &self.bib.field_arena.allocator, self.bytes[entry_type_start..self.idx]);
+            self.allocator, self.bytes[entry_type_start..self.idx]);
         std.debug.print("Lowercased type: {}\n", .{ lowercased });
         const entry_type = std.meta.stringToEnum(
             EntryType, lowercased) orelse {
+                BibParser.report_error("'{}' is not a valid entry type!\n",
+                                       .{ self.bytes[entry_type_start..self.idx] });
                 return Error.SyntaxError;
         };
-        self.bib.field_arena.allocator.free(lowercased);
+        self.allocator.free(lowercased);
+
+        if (entry_type == .comment) {
+            // NOTE: not allowing {} inside comments atm
+            try self.eat_until('}');
+            try self.advance_to_next_byte();
+            return;
+        }
 
         try self.advance_to_next_byte();
         const label_start = self.idx;
-        try self.eat_until(',');
+        try self.eat_name();
+        try self.require_byte(',');
         const label = self.bytes[label_start..self.idx];
 
         // make sure we don't have a duplicate label!
@@ -209,13 +254,95 @@ pub const BibParser = struct {
                 self.advance_to_next_byte() catch return;
                 break;
             } else {
-                // TODO
-                self.idx += 1; // try self.parse_entry_field();
+                try self.parse_entry_field(&entry_found.entry.value);
             }
         }
 
         std.debug.print("Finished entry of type '{}' with label '{}'!\n",
                         .{ entry_type, label });
+    }
+
+    /// expects to start on first byte of field name
+    fn parse_entry_field(self: *BibParser, entry: *Entry) Error!void {
+        const field_name_start = self.idx;
+        try self.eat_name();
+        const field_name_end = self.idx;
+
+        // convert to lower-case to match with enum tagNames
+        const lowercased = try std.ascii.allocLowerString(
+            self.allocator, self.bytes[field_name_start..field_name_end]);
+        const field_type = std.meta.stringToEnum(FieldName, lowercased) orelse .custom;
+        self.allocator.free(lowercased);
+
+        try self.skip_whitespace(true);
+        try self.eat_byte('=');
+        try self.skip_whitespace(true);
+
+        self.eat_byte('{') catch {
+            BibParser.report_error(
+                "This implementation of a bibtex parser requires all field values to " ++
+                "we wrapped in {{braces}}!\n", .{});
+            return Error.SyntaxError;
+        };
+
+        // need to reform field value string since it might contain braces and other
+        // escapes
+        var field_value = std.ArrayList(u8).init(&self.bib.field_arena.allocator);
+
+        var braces: u32 = 0;
+        // TODO foreign/special char escapes e.g. \'{o} for ó etc.
+        // currently just discards the braces
+        // TODO process into name lists etc.
+        // TODO {} protect from case-mangling etc.
+        var byte = self.peek_byte();
+        var added_until = self.idx;  // exclusive
+        while (true) {
+            switch (byte) {
+                '{' => {
+                    braces += 1;
+                    try field_value.appendSlice(self.bytes[added_until..self.idx]);
+                    added_until = self.idx + 1;  // +1 so we don't add the {
+                },
+                '}' => {
+                    if (braces == 0) {
+                        try field_value.appendSlice(self.bytes[added_until..self.idx]);
+                        break;
+                    } else {
+                        braces -= 1;
+                        try field_value.appendSlice(self.bytes[added_until..self.idx]);
+                        added_until = self.idx + 1;  // +1 so we don't add the }
+                    }
+                },
+                '\\' => {
+                    try field_value.appendSlice(self.bytes[added_until..self.idx]);
+                    try self.advance_to_next_byte();
+                    byte = self.peek_byte();
+                    try field_value.append(byte);
+                    added_until = self.idx + 1;
+                },
+                else => {},
+            }
+            try self.advance_to_next_byte();
+            byte = self.peek_byte();
+        }
+        try self.eat_byte('}');
+
+        // , is technichally optional
+        if (self.peek_byte() == ',') {
+            try self.advance_to_next_byte();
+        }
+        
+        std.debug.print("On '{c}',\n{}: {}\n",
+            .{ self.peek_byte(), self.bytes[field_name_start..field_name_end], field_value.items });
+
+        // not checking if field already present
+        try entry.fields.put(
+            self.bytes[field_name_start..field_name_end],
+            Field{
+                .name = field_type,
+                .value = field_value.toOwnedSlice(),
+            }
+        );
     }
 };
 
@@ -253,17 +380,17 @@ pub const FieldType = union(enum) {
 pub const Entry = struct {
     _type: EntryType,
     // label: []const u8,
-    tags: FieldMap,
+    fields: FieldMap,
 
     pub fn init(allocator: *std.mem.Allocator, _type: EntryType) Entry {
         return Entry{
             ._type = _type,
-            .tags = FieldMap.init(allocator),
+            .fields = FieldMap.init(allocator),
         };
     }
 
     pub fn deinit(self: *Entry) void {
-        self.tags.deinit();
+        self.fields.deinit();
     }
 };
 
@@ -271,6 +398,9 @@ pub const Entry = struct {
 /// biblatex manual (only on the bibtex.org/format)
 /// handling @COMMENT
 pub const EntryType = enum {
+    // comment not actually an entry type -> content is ignored
+    comment,
+
     article,
     book,
     mvbook,
@@ -305,7 +435,7 @@ pub const EntryType = enum {
     // aliases
     conference,  // -> inproceedings
     electronic,  // -> online
-    masterthesis,  // special case of thesis, as type tag
+    mastersthesis,  // special case of thesis, as type tag
     phdthesis,  // special case of thesis, as type tag
     techreport,  // -> report, as type tag
     www,  // -> online
@@ -330,7 +460,8 @@ pub const EntryType = enum {
 
 pub const Field = struct {
     name: FieldName,
-    value: FieldType,
+    value: []const u8,
+    // value: FieldType,
 };
 
 pub const FieldName = enum {
