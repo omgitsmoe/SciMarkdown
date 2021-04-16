@@ -101,3 +101,52 @@ pub fn DepthFirstIterator(
         }
     };
 }
+
+pub inline fn is_alpha(char: u8) bool {
+    if ((char >= 'A' and char <= 'Z') or
+        (char >= 'a' and char <= 'z')) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+pub inline fn is_num(char: u8) bool {
+    if (char >= '0' and char <= '9') {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+pub inline fn is_alphanum(char: u8) bool {
+    if (is_alpha(char) or is_num(char)) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+pub inline fn is_end_of_line(char: u8) bool {
+    if ((char == '\r') or (char == '\n')) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+pub inline fn is_space_or_tab(char: u8) bool {
+    if ((char == ' ') or (char == '\t')) {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+pub inline fn is_whitespace(char: u8) bool {
+    if (is_space_or_tab(char) or is_end_of_line(char)) {
+        return true;
+    } else {
+        return false;
+    }
+}
