@@ -14,24 +14,22 @@ pub fn main() !void {
 
     const allocator = &gpa.allocator;
 
-    var res = try ListField.parse_name("von Last, First");
-    // const file = try std.fs.cwd().openFile(
-    //     "D:\\SYNC\\coding\\pistis\\book-2020-07-28.bib", .{ .read = true });
-    // defer file.close();
+    const file = try std.fs.cwd().openFile(
+        "D:\\SYNC\\coding\\pistis\\book-2020-07-28.bib", .{ .read = true });
+    defer file.close();
 
-    // // there's also file.readAll that requires a pre-allocated buffer
-    // // TODO dynamically sized buffer
-    // // TODO just pass buffer and filename, loading of the file should be done elsewhere
-    // const contents = try file.reader().readAllAlloc(
-    //     allocator,
-    //     2 * 1024 * 1024,  // max_size 2MiB, returns error.StreamTooLong if file is larger
-    // );
-    // defer allocator.free(contents);
+    // there's also file.readAll that requires a pre-allocated buffer
+    // TODO dynamically sized buffer
+    // TODO just pass buffer and filename, loading of the file should be done elsewhere
+    const contents = try file.reader().readAllAlloc(
+        allocator,
+        2 * 1024 * 1024,  // max_size 2MiB, returns error.StreamTooLong if file is larger
+    );
+    defer allocator.free(contents);
 
-    // var bp = try BibParser.init(allocator, "", contents);
-    // var bib = try bp.parse();
-    // defer bib.deinit();
-
+    var bp = try BibParser.init(allocator, "", contents);
+    var bib = try bp.parse();
+    defer bib.deinit();
 }
 
 pub const BibParser = struct {
@@ -202,7 +200,7 @@ pub const BibParser = struct {
     }
 
     fn parse_entry(self: *BibParser) Error!void {
-        std.debug.print("Parse entry\n", .{});
+        // std.debug.print("Parse entry\n", .{});
         const entry_type_start = self.idx;
         while (self.peek_byte() != '{') {
             self.advance_to_next_byte() catch {
@@ -213,7 +211,7 @@ pub const BibParser = struct {
         // convert to lower-case to match with enum tagNames
         const lowercased = try std.ascii.allocLowerString(
             self.allocator, self.bytes[entry_type_start..self.idx]);
-        std.debug.print("Lowercased type: {}\n", .{ lowercased });
+        // std.debug.print("Lowercased type: {}\n", .{ lowercased });
         const entry_type = std.meta.stringToEnum(
             EntryType, lowercased) orelse {
                 BibParser.report_error("'{}' is not a valid entry type!\n",
@@ -260,8 +258,8 @@ pub const BibParser = struct {
             }
         }
 
-        std.debug.print("Finished entry of type '{}' with label '{}'!\n",
-                        .{ entry_type, label });
+        // std.debug.print("Finished entry of type '{}' with label '{}'!\n",
+        //                 .{ entry_type, label });
     }
 
     /// expects to start on first byte of field name
@@ -289,7 +287,7 @@ pub const BibParser = struct {
 
         // need to reform field value string since it might contain braces and other
         // escapes
-        var field_value = std.ArrayList(u8).init(&self.bib.field_arena.allocator);
+        var field_value_str = std.ArrayList(u8).init(&self.bib.field_arena.allocator);
 
         var braces: u32 = 0;
         // TODO foreign/special char escapes e.g. \'{o} for ó etc.
@@ -302,24 +300,24 @@ pub const BibParser = struct {
             switch (byte) {
                 '{' => {
                     braces += 1;
-                    try field_value.appendSlice(self.bytes[added_until..self.idx]);
+                    try field_value_str.appendSlice(self.bytes[added_until..self.idx]);
                     added_until = self.idx + 1;  // +1 so we don't add the {
                 },
                 '}' => {
                     if (braces == 0) {
-                        try field_value.appendSlice(self.bytes[added_until..self.idx]);
+                        try field_value_str.appendSlice(self.bytes[added_until..self.idx]);
                         break;
                     } else {
                         braces -= 1;
-                        try field_value.appendSlice(self.bytes[added_until..self.idx]);
+                        try field_value_str.appendSlice(self.bytes[added_until..self.idx]);
                         added_until = self.idx + 1;  // +1 so we don't add the }
                     }
                 },
                 '\\' => {
-                    try field_value.appendSlice(self.bytes[added_until..self.idx]);
+                    try field_value_str.appendSlice(self.bytes[added_until..self.idx]);
                     try self.advance_to_next_byte();
                     byte = self.peek_byte();
-                    try field_value.append(byte);
+                    try field_value_str.append(byte);
                     added_until = self.idx + 1;
                 },
                 else => {},
@@ -334,35 +332,51 @@ pub const BibParser = struct {
             try self.advance_to_next_byte();
         }
         
-        std.debug.print("On '{c}',\n{}: {}\n",
-            .{ self.peek_byte(), self.bytes[field_name_start..field_name_end], field_value.items });
+        // std.debug.print("Field -> {}: {}\n",
+        //     .{ self.bytes[field_name_start..field_name_end], field_value_str.items });
 
         const field_type = field_name.get_field_type();
-        if (is_single_field_type(field_type)) {
-            // not checking if field already present
-            try entry.fields.put(
-                self.bytes[field_name_start..field_name_end],
-                Field{
-                    .name = field_type,
-                    .value = field_value.toOwnedSlice(),
-                }
-            );
-        } else {
-            // not checking if field already present
-            try entry.fields.put(
-                self.bytes[field_name_start..field_name_end],
-                Field{
-                    .name = field_type,
-                    .value = field_value.toOwnedSlice(),
-                }
-            );
+        // payload will be undefined after from_field_tag
+        var field_value = FieldType.from_field_tag(field_type);
+        switch (field_value) {
+            .name_list, .literal_list, .key_list => |*value| {
+                // NOTE: the split list still uses the memory of field_value_str
+                // so we can't free it
+                value.*.values = try BibParser.split_list(
+                    &self.bib.field_arena.allocator, field_value_str.toOwnedSlice());
+            },
+            .literal_field, .range_field, .integer_field, .datepart_field, .date_field,
+            .verbatim_field, .uri_field, .separated_value_field, .pattern_field,
+            .key_field, .code_field, .special_field, => |*value| {
+                value.*.value = field_value_str.toOwnedSlice();
+            },
         }
+
+        // not checking if field already present
+        try entry.fields.put(
+            self.bytes[field_name_start..field_name_end],
+            Field{
+                .name = field_name,
+                .data = field_value,
+            }
+        );
     }
 
-    fn split_list(bytes: []const u8) []const []const u8 {
+    inline fn split_list(allocator: *std.mem.Allocator, bytes: []const u8) Error![]const []const u8 {
         // NOTE: not checking keys of key lists
         // NOTE: leaving names of name lists as-is and parsing them on demand
         // with ListField.parse_name
+        var split_items = std.ArrayList([]const u8).init(allocator);
+        var split_iter = std.mem.split(bytes, " and ");
+        while (split_iter.next()) |item| {
+            try split_items.append(item);
+        }
+
+        // std.debug.print("Split list into:\n", .{});
+        // for (split_items.items) |it| {
+        //     std.debug.print("    {}\n", .{ it });
+        // }
+        return split_items.toOwnedSlice();
     }
 };
 
@@ -400,6 +414,28 @@ pub const FieldType = union(enum) {
     key_field:      SingleField,
     code_field:     SingleField,
     special_field:  SingleField,
+
+    /// returns union with correct tag activated based on it's tag type
+    /// NOTE: the payload type will be undefined!
+    pub fn from_field_tag(tag: FieldTypeTT) FieldType {
+        return switch (tag) {
+            .name_list =>       FieldType{ .name_list = undefined },
+            .literal_list =>    FieldType{ .literal_list = undefined },
+            .key_list =>        FieldType{ .key_list = undefined },
+            .literal_field =>   FieldType{ .literal_field = undefined },
+            .range_field =>     FieldType{ .range_field = undefined },
+            .integer_field =>   FieldType{ .integer_field = undefined },
+            .datepart_field =>  FieldType{ .datepart_field = undefined },
+            .date_field =>      FieldType{ .date_field = undefined },
+            .verbatim_field =>  FieldType{ .verbatim_field = undefined },
+            .uri_field =>       FieldType{ .uri_field = undefined },
+            .separated_value_field => FieldType{ .separated_value_field = undefined },
+            .pattern_field =>   FieldType{ .pattern_field = undefined },
+            .key_field =>       FieldType{ .key_field = undefined },
+            .code_field =>      FieldType{ .code_field = undefined },
+            .special_field =>   FieldType{ .special_field = undefined },
+        };
+    }
 };
 pub const ListField = struct {
     values: []const []const u8,
@@ -704,9 +740,9 @@ pub const EntryType = enum {
 };
 
 pub const Field = struct {
+    // currently not storing str for custom FieldName here, use the key from FieldMap
     name: FieldName,
-    value: []const u8,
-    // value: FieldType,
+    data: FieldType,
 };
 
 pub const FieldName = enum {
@@ -895,18 +931,20 @@ pub const FieldName = enum {
     // special fields END
 
     pub fn get_field_type(self: FieldName) FieldTypeTT {
-        return switch (self) {
-            .custom ... .primaryclass => .literal_field,
-            .afterword ... .namec => .name_list,
-            .authortype ... .namectype => .key_field,
-            .date ... .urldate => .date_field, 
-            .doi ... .pdf => .verbatim_field,
-            .institution ... .school => .literal_list,
-            .language, .origlanguage => .key_list,
-            .pages => .range_field,
-            .url => .uri_field,
-            .volume, .volumes => integer_field,
-            .ids ... .xref => .special_field,
+        // ... is not allowed with enums, so cast it to it's underlying int tag type
+        return switch (@enumToInt(self)) {
+            @enumToInt(FieldName.custom) ... @enumToInt(FieldName.primaryclass) => .literal_field,
+            @enumToInt(FieldName.afterword) ... @enumToInt(FieldName.namec) => .name_list,
+            @enumToInt(FieldName.authortype) ... @enumToInt(FieldName.namectype) => .key_field,
+            @enumToInt(FieldName.date) ... @enumToInt(FieldName.urldate) => .date_field, 
+            @enumToInt(FieldName.doi) ... @enumToInt(FieldName.pdf) => .verbatim_field,
+            @enumToInt(FieldName.institution) ... @enumToInt(FieldName.school) => .literal_list,
+            @enumToInt(FieldName.language), @enumToInt(FieldName.origlanguage) => .key_list,
+            @enumToInt(FieldName.pages) => .range_field,
+            @enumToInt(FieldName.url) => .uri_field,
+            @enumToInt(FieldName.volume), @enumToInt(FieldName.volumes) => .integer_field,
+            @enumToInt(FieldName.ids) ... @enumToInt(FieldName.xref) => .special_field,
+            else => unreachable,
         };
     }
 };
