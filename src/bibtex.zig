@@ -2,36 +2,6 @@ const std = @import("std");
 const utils = @import("utils.zig");
 const expect = std.testing.expect;
 
-pub fn main() !void {
-    // gpa optimized for safety over performance; can detect leaks, double-free and use-after-free
-    // takes a config struct (empty here .{})
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer {
-        const leaked = gpa.deinit();
-        // print takes a format string and a struct
-        // prints automatically std.debug.print("Leak detected: {}\n", .{leaked});
-    }
-
-    const allocator = &gpa.allocator;
-
-    const file = try std.fs.cwd().openFile(
-        "D:\\SYNC\\coding\\pistis\\book-2020-07-28.bib", .{ .read = true });
-    defer file.close();
-
-    // there's also file.readAll that requires a pre-allocated buffer
-    // TODO dynamically sized buffer
-    // TODO just pass buffer and filename, loading of the file should be done elsewhere
-    const contents = try file.reader().readAllAlloc(
-        allocator,
-        2 * 1024 * 1024,  // max_size 2MiB, returns error.StreamTooLong if file is larger
-    );
-    defer allocator.free(contents);
-
-    var bp = try BibParser.init(allocator, "", contents);
-    var bib = try bp.parse();
-    defer bib.deinit();
-}
-
 pub const BibParser = struct {
     bib: Bibliography,
     idx: u32,
@@ -143,6 +113,11 @@ pub const BibParser = struct {
 
     /// caller owns memory of return Bibliography
     pub fn parse(self: *BibParser) Error!Bibliography {
+        // clean up on error so we don't leak on unsuccessful parses
+        errdefer {
+            self.bib.deinit();
+        }
+
         while (self.idx < self.bytes.len) {
             var byte = self.peek_byte();
             if (utils.is_whitespace(byte)) {
@@ -200,7 +175,6 @@ pub const BibParser = struct {
     }
 
     fn parse_entry(self: *BibParser) Error!void {
-        // std.debug.print("Parse entry\n", .{});
         const entry_type_start = self.idx;
         while (self.peek_byte() != '{') {
             self.advance_to_next_byte() catch {
@@ -223,7 +197,14 @@ pub const BibParser = struct {
         if (entry_type == .comment) {
             // NOTE: not allowing {} inside comments atm
             try self.eat_until('}');
-            try self.advance_to_next_byte();
+            // TODO @Improve
+            self.advance_to_next_byte() catch {
+                // advance_to_next_byte errors since we're at the last byte before EOF
+                // but we know the current one is '{' so we advance it manually
+                // so the main loop in parse can exit properly
+                self.idx += 1;
+                return;
+            };
             return;
         }
 
@@ -251,9 +232,14 @@ pub const BibParser = struct {
             try self.skip_whitespace(true);
             byte = self.bytes[self.idx];
             if (byte == '}') {
-                self.advance_to_next_byte() catch return;
+                self.advance_to_next_byte() catch {
+                    self.idx += 1;
+                    return;
+                };
                 break;
             } else {
+                // NOTE: label_entry_map can't be modified while the function below is
+                // still running otherwise the entry ptr might? get invalidated
                 try self.parse_entry_field(&entry_found.entry.value);
             }
         }
@@ -278,10 +264,12 @@ pub const BibParser = struct {
         try self.eat_byte('=');
         try self.skip_whitespace(true);
 
+        // TODO worth to handle field values that are not wrapped in {} and those
+        // that are wrapped in "" and thus can be concatenated using '#'?
         self.eat_byte('{') catch {
             BibParser.report_error(
                 "This implementation of a bibtex parser requires all field values to " ++
-                "we wrapped in {{braces}}!\n", .{});
+                "be wrapped in {{braces}}!\n", .{});
             return Error.SyntaxError;
         };
 
@@ -352,7 +340,7 @@ pub const BibParser = struct {
             },
         }
 
-        // not checking if field already present
+        // not checking if field already present -> gets overwritten
         try entry.fields.put(
             self.bytes[field_name_start..field_name_end],
             Field{
@@ -377,8 +365,108 @@ pub const BibParser = struct {
         //     std.debug.print("    {}\n", .{ it });
         // }
         return split_items.toOwnedSlice();
+        // return &[_][]const u8 { "test", "other" };
     }
 };
+
+test "split list" {
+    const alloc = std.testing.allocator;
+    var res = try BibParser.split_list(alloc, "A and B and C and others");
+    var expected = [_][]const u8 { "A", "B", "C", "others" };
+    for (res) |it, i| {
+        expect(std.mem.eql(u8, it, expected[i]));
+    }
+    // otherwise testing allocator complains about memory leak
+    alloc.free(res);
+
+    res = try BibParser.split_list(alloc, "Hand and von Band, Jr., Test and Stand de Ipsum and others");
+    expected = [_][]const u8 { "Hand", "von Band, Jr., Test", "Stand de Ipsum", "others" };
+    for (res) |it, i| {
+        expect(std.mem.eql(u8, it, expected[i]));
+    }
+    alloc.free(res);
+}
+
+test "bibparser" {
+    const alloc = std.testing.allocator;
+    const bibtxt =
+        \\% Encoding: UTF-8
+        \\@Article{Seidel2015,
+        \\author    = {{Dominik} {Seidel} and {Nils Hoffmann} and Martin Ehbrecht and Julia Juchheim and Christian Ammer},
+        \\title     = {{How} neighborhood affects tree diameter increment},
+        \\journal   = {Forest Ecology and Management},
+        \\year      = {2015},
+        \\volume    = {336},
+        \\pages     = {119--128},
+        \\month     = {jan},
+        \\doi       = {10.1016/j.foreco.2014.10.020},
+        \\file      = {:../Lit/Seidel et al. 2015_as downloaded.pdf:PDF},
+        \\publisher = {Elsevier {BV}},
+        \\}
+        \\@Comment{jabref-meta: databaseType:bibtex;}
+    ;
+
+    var bp = try BibParser.init(alloc, "/home/test/path", bibtxt);
+    var bib = try bp.parse();
+    defer bib.deinit();
+
+    expect(std.mem.eql(u8, bib.path, "/home/test/path"));
+
+    var entry = bib.label_entry_map.get("Seidel2015").?;
+    expect(entry._type == .article);
+
+    const author = entry.fields.get("author").?;
+    const author_expected = [_][]const u8 {
+        "Dominik Seidel", "Nils Hoffmann", "Martin Ehbrecht", "Julia Juchheim", "Christian Ammer"
+    };
+    for (author.data.name_list.values) |it, i| {
+        expect(std.mem.eql(u8, it, author_expected[i]));
+    }
+
+    var field = entry.fields.get("title").?;
+    expect(std.mem.eql(
+            u8, field.data.literal_field.value, "How neighborhood affects tree diameter increment"));
+
+    field = entry.fields.get("journal").?;
+    expect(std.mem.eql(
+            u8, field.data.literal_field.value, "Forest Ecology and Management"));
+
+    field = entry.fields.get("year").?;
+    expect(std.mem.eql(
+            u8, field.data.literal_field.value, "2015"));
+
+    field = entry.fields.get("volume").?;
+    expect(std.mem.eql(
+            u8, field.data.integer_field.value, "336"));
+
+    field = entry.fields.get("pages").?;
+    expect(std.mem.eql(
+            u8, field.data.range_field.value, "119--128"));
+
+    field = entry.fields.get("month").?;
+    expect(std.mem.eql(
+            u8, field.data.literal_field.value, "jan"));
+
+    field = entry.fields.get("doi").?;
+    expect(std.mem.eql(
+            u8, field.data.verbatim_field.value, "10.1016/j.foreco.2014.10.020"));
+
+    field = entry.fields.get("publisher").?;
+    expect(field.data.literal_list.values.len == 1);
+    expect(std.mem.eql(u8, field.data.literal_list.values[0], "Elsevier BV"));
+}
+
+test "bibparser no leak on err" {
+    const alloc = std.testing.allocator;
+    const bibtxt =
+        \\% Encoding: UTF-8
+        \\@Article{Seidel2015,
+    ;
+
+    var bp = try BibParser.init(alloc, "/home/test/path", bibtxt);
+    var bib = bp.parse();
+    std.testing.expectError(BibParser.Error.EndOfFile, bib);
+}
 
 pub const FieldMap = std.StringHashMap(Field);
 pub const Bibliography = struct {
@@ -663,6 +751,8 @@ pub const Entry = struct {
     // label: []const u8,
     fields: FieldMap,
 
+    /// FieldMap should be initialized with Bibliography.field_arena.allocator
+    /// so we don't have to deinit
     pub fn init(allocator: *std.mem.Allocator, _type: EntryType) Entry {
         return Entry{
             ._type = _type,
