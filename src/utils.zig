@@ -127,6 +127,22 @@ pub inline fn is_alphanum(char: u8) bool {
     }
 }
 
+pub inline fn is_lowercase(char: u8) bool {
+    if (char >= 'a' and char <= 'z') {
+        return true;
+    } else {
+        return false;
+    }
+}
+
+pub inline fn is_uppercase(char: u8) bool {
+    if (char >= 'A' and char <= 'Z') {
+        return true;
+    } else {
+        return false;
+    }
+}
+
 pub inline fn is_end_of_line(char: u8) bool {
     if ((char == '\r') or (char == '\n')) {
         return true;

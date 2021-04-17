@@ -1,5 +1,6 @@
 const std = @import("std");
 const utils = @import("utils.zig");
+const expect = std.testing.expect;
 
 pub fn main() !void {
     // gpa optimized for safety over performance; can detect leaks, double-free and use-after-free
@@ -13,22 +14,23 @@ pub fn main() !void {
 
     const allocator = &gpa.allocator;
 
-    const file = try std.fs.cwd().openFile(
-        "D:\\SYNC\\coding\\pistis\\book-2020-07-28.bib", .{ .read = true });
-    defer file.close();
+    var res = try ListField.parse_name("von Last, First");
+    // const file = try std.fs.cwd().openFile(
+    //     "D:\\SYNC\\coding\\pistis\\book-2020-07-28.bib", .{ .read = true });
+    // defer file.close();
 
-    // there's also file.readAll that requires a pre-allocated buffer
-    // TODO dynamically sized buffer
-    // TODO just pass buffer and filename, loading of the file should be done elsewhere
-    const contents = try file.reader().readAllAlloc(
-        allocator,
-        2 * 1024 * 1024,  // max_size 2MiB, returns error.StreamTooLong if file is larger
-    );
-    defer allocator.free(contents);
+    // // there's also file.readAll that requires a pre-allocated buffer
+    // // TODO dynamically sized buffer
+    // // TODO just pass buffer and filename, loading of the file should be done elsewhere
+    // const contents = try file.reader().readAllAlloc(
+    //     allocator,
+    //     2 * 1024 * 1024,  // max_size 2MiB, returns error.StreamTooLong if file is larger
+    // );
+    // defer allocator.free(contents);
 
-    var bp = try BibParser.init(allocator, "", contents);
-    var bib = try bp.parse();
-    defer bib.deinit();
+    // var bp = try BibParser.init(allocator, "", contents);
+    // var bib = try bp.parse();
+    // defer bib.deinit();
 
 }
 
@@ -38,7 +40,7 @@ pub const BibParser = struct {
     bytes: []const u8,
     allocator: *std.mem.Allocator,
 
-    const Error = error {
+    pub const Error = error {
         SyntaxError,
         OutOfMemory,
         EndOfFile,
@@ -271,7 +273,7 @@ pub const BibParser = struct {
         // convert to lower-case to match with enum tagNames
         const lowercased = try std.ascii.allocLowerString(
             self.allocator, self.bytes[field_name_start..field_name_end]);
-        const field_type = std.meta.stringToEnum(FieldName, lowercased) orelse .custom;
+        const field_name = std.meta.stringToEnum(FieldName, lowercased) orelse .custom;
         self.allocator.free(lowercased);
 
         try self.skip_whitespace(true);
@@ -335,14 +337,32 @@ pub const BibParser = struct {
         std.debug.print("On '{c}',\n{}: {}\n",
             .{ self.peek_byte(), self.bytes[field_name_start..field_name_end], field_value.items });
 
-        // not checking if field already present
-        try entry.fields.put(
-            self.bytes[field_name_start..field_name_end],
-            Field{
-                .name = field_type,
-                .value = field_value.toOwnedSlice(),
-            }
-        );
+        const field_type = field_name.get_field_type();
+        if (is_single_field_type(field_type)) {
+            // not checking if field already present
+            try entry.fields.put(
+                self.bytes[field_name_start..field_name_end],
+                Field{
+                    .name = field_type,
+                    .value = field_value.toOwnedSlice(),
+                }
+            );
+        } else {
+            // not checking if field already present
+            try entry.fields.put(
+                self.bytes[field_name_start..field_name_end],
+                Field{
+                    .name = field_type,
+                    .value = field_value.toOwnedSlice(),
+                }
+            );
+        }
+    }
+
+    fn split_list(bytes: []const u8) []const []const u8 {
+        // NOTE: not checking keys of key lists
+        // NOTE: leaving names of name lists as-is and parsing them on demand
+        // with ListField.parse_name
     }
 };
 
@@ -361,21 +381,246 @@ pub const Bibliography = struct {
 // could use std.meta.TagPayloadType to get payload type from tag on a tagged union
 pub const FieldTypeTT = std.meta.TagType(FieldType);
 pub const FieldType = union(enum) {
-    name_list,
-    literal_list,
-    key_list,
-    literal_field,
-    range_field,
-    integer_field,
-    datepart_field,
-    date_field,
-    verbatim_field,
-    uri_field,
-    separated_value_field,
-    pattern_field,
-    key_field,
-    code_field,
+    // lists
+    // all lists can be shortened with 'and others'
+    // in case of name_list it will then always print et al. in the bibliography
+    name_list:    ListField,
+    literal_list: ListField,
+    key_list:     ListField,
+    // fields
+    literal_field:  SingleField,
+    range_field:    SingleField,
+    integer_field:  SingleField,
+    datepart_field: SingleField,
+    date_field:     SingleField,
+    verbatim_field: SingleField,
+    uri_field:      SingleField,
+    separated_value_field: SingleField,
+    pattern_field:  SingleField,
+    key_field:      SingleField,
+    code_field:     SingleField,
+    special_field:  SingleField,
 };
+pub const ListField = struct {
+    values: []const []const u8,
+
+    pub const Name = struct {
+        last: ?[]const u8 = null,
+        first: ?[]const u8 = null,
+        prefix: ?[]const u8 = null,
+        suffix: ?[]const u8 = null,
+
+        const unkown_format_err = "Name has unkown format{s}!\n" ++
+                                  "Formats are:\n" ++
+                                  "First von Last\n" ++
+                                  "von Last, First\n" ++
+                                  "von Last, Jr, First\n";
+    };
+
+    const NameState = enum {
+        first,
+        prefix,
+        suffix,
+        last,
+    };
+
+    /// doesn't recognize lowercase unicode codepoints which is need for identifying
+    /// the prefix part of the Name
+    pub fn parse_name(name: []const u8) BibParser.Error!Name {
+        // 4 name components:
+        // Family name (also known as 'last' part)
+        // Given name (also known as 'first' part)
+        // Name prefix (also known as 'von' part)
+        // Name suffix (also known as 'Jr' part)
+        // the name can be typed in one of 3 forms:
+        // "First von Last"
+        // "von Last, First"
+        // "von Last, Jr, First"
+
+        var commas: u8 = 0;
+        for (name) |c| {
+            if (c == ',') {
+                commas += 1;
+            }
+        }
+        switch (commas) {
+            0 => return parse_name_simple(name),
+            1, 2 => return parse_name_with_commas(name, commas),
+            // technichally this should remove the extra commas >2
+            else => return parse_name_with_commas(name, commas),
+        }
+
+        return result;
+    }
+
+    fn parse_name_simple(name: []const u8) BibParser.Error!Name {
+        // words split by whitespace
+        // up to first lowercase word is 'first'
+        // all following lowercase words are 'prefix'
+        // first uppercase word starts 'last'
+        // no suffix part
+        var result = Name{};
+        var state = NameState.first;
+        var i: u16 = 0;
+        var last_end: u16 = 0; // exclusive
+        var prev_whitespace = false;
+        while (i < name.len) : ( i += 1 ) {
+            if (utils.is_whitespace(name[i])) {
+                prev_whitespace = true;
+                // to skip initial whitespace
+                if (i == last_end) {
+                    last_end += 1;
+                }
+            } else if (prev_whitespace) {
+                switch (name[i]) {
+                    'a'...'z' => {
+                        switch (state) {
+                            .first => {
+                                state = .prefix;
+                                // -2 to not include last space
+                                result.first = name[last_end..i-1];
+                                last_end = i;
+                            },
+                            else => {}
+                        }
+                    },
+                    'A'...'Z' => {
+                        switch (state) {
+                            .prefix => {
+                                state = .last;
+                                // -2 to not include last space
+                                result.prefix = name[last_end..i-1];
+                                last_end = i;
+                            },
+                            else => {},
+                        }
+                    },
+                    else => {},
+                }
+                prev_whitespace = false;
+            }
+        }
+        result.last = name[last_end..];
+
+        return result;
+    }
+
+    fn parse_name_with_commas(name: []const u8, num_commas: u8) BibParser.Error!Name {
+        var result = Name{};
+        var state = NameState.prefix;
+        var last_end: u16 = 0; // exclusive
+        var i: u16 = 0;
+        var prev_whitespace = false;
+        while (i < name.len) : ( i += 1) {
+            if (utils.is_whitespace(name[i])) {
+                prev_whitespace = true;
+                // to skip initial whitespace
+                if (i == last_end) {
+                    last_end += 1;
+                }
+            } else if (prev_whitespace) {
+                switch (name[i]) {
+                    // 'a'...'z' => {
+                    // },
+                    'A'...'Z' => {
+                        if (state == .prefix) {
+                            state = .last;
+                            if (last_end != i) {
+                                result.prefix = name[last_end..i-1];
+                                last_end = i;
+                            }
+                        }
+                    },
+                    else => {},
+                }
+                prev_whitespace = false;
+            }
+            switch (name[i]) {
+                ',' => {
+                    switch (state) {
+                        .last, .prefix => {
+                            // prefix:
+                            // only lowercase words so far but comma would now start first/suffix
+                            // treat everything up to here as last
+                            state = if (num_commas < 2) .first else .suffix;
+                            result.last = name[last_end..i];
+                            last_end = i + 1;  // skip ,
+                        },
+                        .suffix => {
+                            state = .first;
+                            result.suffix = name[last_end..i];
+                            last_end = i + 1;  // skip ,
+                        },
+                        else => {},
+                    }
+                },
+                else => {}
+            }
+        }
+        result.first = name[last_end..];
+
+        return result;
+    }
+};
+pub const SingleField = struct {
+    value: []const u8,
+};
+
+inline fn is_single_field_type(field_type: FieldTypeTT) void {
+    return switch (field_type) {
+        .name_list, .literal_list, .key_list => false,
+        else => true,
+    };
+}
+
+test "parse name simple" {
+    var res = try ListField.parse_name("First von Last");
+    expect(std.mem.eql(u8, res.first.?, "First"));
+    expect(std.mem.eql(u8, res.prefix.?, "von"));
+    expect(std.mem.eql(u8, res.last.?, "Last"));
+    expect(res.suffix == null);
+
+    res = try ListField.parse_name("First J. Other von da of Last Last");
+    expect(std.mem.eql(u8, res.first.?, "First J. Other"));
+    expect(std.mem.eql(u8, res.prefix.?, "von da of"));
+    expect(std.mem.eql(u8, res.last.?, "Last Last"));
+    expect(res.suffix == null);
+
+    // only skipping initial whitespace for now
+    // TODO?
+    res = try ListField.parse_name("    First von Last");
+    expect(std.mem.eql(u8, res.first.?, "First"));
+    expect(std.mem.eql(u8, res.prefix.?, "von"));
+    expect(std.mem.eql(u8, res.last.?, "Last"));
+    expect(res.suffix == null);
+}
+
+test "parse name commas" {
+    var res = try ListField.parse_name("von Last, First");
+    expect(std.mem.eql(u8, res.first.?, "First"));
+    expect(std.mem.eql(u8, res.prefix.?, "von"));
+    expect(std.mem.eql(u8, res.last.?, "Last"));
+    expect(res.suffix == null);
+
+    res = try ListField.parse_name("von de of Last Last, First Other");
+    expect(std.mem.eql(u8, res.first.?, "First Other"));
+    expect(std.mem.eql(u8, res.prefix.?, "von de of"));
+    expect(std.mem.eql(u8, res.last.?, "Last Last"));
+    expect(res.suffix == null);
+
+    // 2 commas
+    res = try ListField.parse_name("von Last, Jr., First");
+    expect(std.mem.eql(u8, res.first.?, "First"));
+    expect(std.mem.eql(u8, res.prefix.?, "von"));
+    expect(std.mem.eql(u8, res.last.?, "Last"));
+    expect(std.mem.eql(u8, res.suffix.?, "Jr."));
+
+    res = try ListField.parse_name("   von de of Last Last, Jr. Sr., First Other");
+    expect(std.mem.eql(u8, res.first.?, "First Other"));
+    expect(std.mem.eql(u8, res.prefix.?, "von de of"));
+    expect(std.mem.eql(u8, res.last.?, "Last Last"));
+    expect(std.mem.eql(u8, res.suffix.?, "Jr. Sr."));
+}
 
 pub const Entry = struct {
     _type: EntryType,
@@ -465,73 +710,26 @@ pub const Field = struct {
 };
 
 pub const FieldName = enum {
+    // NOTE: IMPORTANT don't change the order of these since it requires to also change
+    // the switch in get_field_type below
+    // literal_field START
     custom,  // arbitrary name to e.g. save additional info
-    // special fields
-    ids,
-    crossref,
-    fakeset,
-    entryset,
-    entrysubtype,
-    execute,
-    hyphenation,
-    keywords,
-    label,
-    langid,
-    langidopts,
-    options,
-    presort,
-    related,
-    relatedoptions,
-    relatedtype,
-    shorthand,
-    sortshorthand,
-    sortkey,
-    sortname,
-    sorttitle,
-    sortyear,
-    xref,
-    // data fields
     abstract,
     addendum,
-    address,
-    afterword,
     annotation,
-    annote,
-    annotator,
-    author,
-    authortype,
-    bookauthor,
     booksubtitle,
     booktitle,
     booktitleaddon,
     chapter,
-    commentator,
-    date,
-    doi,
-    edition,
-    editor,
-    editora,
-    editorb,
-    editorc,
-    editortype,
-    editoratype,
-    editorbtype,
-    editorctype,
+    edition,  // can be integer or literal
     eid,
-    eprint,
+    entrysubtype,
     eprintclass,
     eprinttype,
-    eventdate,
     eventtitle,
     eventtitleaddon,
-    file,
-    foreword,
-    gender,
     howpublished,
-    indexsorttitle,
     indextitle,
-    institution,
-    introduction,
     isan,
     isbn,
     ismn,
@@ -540,14 +738,13 @@ pub const FieldName = enum {
     issue,
     issuetitle,
     issuesubtitle,
+    issuetitleaddon,
     iswc,
-    journal,
     journaltitle,
     journalsubtitle,
-    language,
+    journaltitleaddon,
+    label,
     library,
-    location,
-    bookpagination,
     mainsubtitle,
     maintitle,
     maintitleaddon,
@@ -555,25 +752,12 @@ pub const FieldName = enum {
     nameaddon,
     note,
     number,
-    organization,
-    origlanguage,
-    origlocation,
-    origpublisher,
     origtitle,
-    origdate,
-    pages,
     pagetotal,
-    pagination,
     part,
-    pdf,
-    pubstate,
     reprinttitle,
-    holder,
-    publisher,
-    school,
     series,
-    shortauthor,
-    shorteditor,
+    shorthand,
     shorthandintro,
     shortjournal,
     shortseries,
@@ -581,31 +765,9 @@ pub const FieldName = enum {
     subtitle,
     title,
     titleaddon,
-    translator,
-    @"type",
-    url,
-    urldate,
     venue,
     version,
-    volume,
-    volumes,
     year,
-    // aliases
-    archiveprefix,
-    primaryclass,
-    // custom fields
-    namea,
-    nameb,
-    namec,
-    nameatype,
-    namebtype,
-    namectype,
-    lista,
-    listb,
-    listc,
-    listd,
-    liste,
-    listf,
     usera,
     userb,
     userc,
@@ -615,4 +777,136 @@ pub const FieldName = enum {
     verba,
     verbb,
     verbc,
+    annote,   // alias for annotation
+    archiveprefix,  // alias -> eprinttype
+    journal,   // alias -> journaltitle
+    key,  // aliast -> sortkey
+    primaryclass,  // alias -> eprintclass
+    // literal_field END
+    //
+    // name_list START
+    afterword,
+    annotator,
+    author,
+    bookauthor,
+    commentator,
+    editor,
+    editora,
+    editorb,
+    editorc,
+    foreword,
+    holder,
+    introduction,
+    shortauthor,
+    shorteditor,
+    translator,
+    namea,
+    nameb,
+    namec,
+    // name_list END
+    //
+    // key_field START
+    authortype,
+    bookpagination,
+    editortype,
+    editoratype,
+    editorbtype,
+    editorctype,
+    pagination,
+    @"type",
+    nameatype,
+    namebtype,
+    namectype,
+    // key_field END
+    //
+    // date_field START
+    date,
+    eventdate,
+    origdate,
+    urldate,
+    // date_field END
+    //
+    // verbatim_field START
+    doi,
+    eprint,
+    file,
+    pdf,   // alias -> file
+    // verbatim_field END
+    //
+    // literal_list START
+    institution,
+    location,
+    organization,
+    origlocation,
+    origpublisher,
+    publisher,
+    pubstate,
+    lista,
+    listb,
+    listc,
+    listd,
+    liste,
+    listf,
+    address,  // alias for location
+    school,   // alias -> institution
+    // literal_list END
+    //
+    // key_list START
+    language,
+    origlanguage,
+    // key_list END
+    //
+    // range_field START
+    pages,
+    // range_field END
+    //
+    // uri_field START
+    url,
+    // uri_field END
+    //
+    // integer_field START
+    volume,
+    volumes,
+    // integer_field END
+    //
+    // special fields START
+    ids,
+    crossref,
+    fakeset,
+    gender,
+    entryset,
+    execute,
+    hyphenation,
+    indexsorttitle,
+    keywords,
+    langid,
+    langidopts,
+    options,
+    presort,
+    related,
+    relatedoptions,
+    relatedtype,
+    sortshorthand,
+    sortkey,
+    sortname,
+    sorttitle,
+    sortyear,
+    xref,
+    // special fields END
+
+    pub fn get_field_type(self: FieldName) FieldTypeTT {
+        return switch (self) {
+            .custom ... .primaryclass => .literal_field,
+            .afterword ... .namec => .name_list,
+            .authortype ... .namectype => .key_field,
+            .date ... .urldate => .date_field, 
+            .doi ... .pdf => .verbatim_field,
+            .institution ... .school => .literal_list,
+            .language, .origlanguage => .key_list,
+            .pages => .range_field,
+            .url => .uri_field,
+            .volume, .volumes => integer_field,
+            .ids ... .xref => .special_field,
+        };
+    }
 };
