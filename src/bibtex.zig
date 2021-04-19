@@ -136,8 +136,8 @@ pub const BibParser = struct {
                 },
                 else => {
                     BibParser.report_error(
-                        "Unexpected byte '{c}' expected either '@EntryType' or '%'" ++
-                        " to start a line comment!\n", .{ byte });
+                        "Unexpected byte '{c}' expected either '@' followed by a valid " ++
+                        " entry type or '%' to start a line comment!\n", .{ byte });
                     return Error.SyntaxError;
                 },
             }
@@ -210,6 +210,7 @@ pub const BibParser = struct {
 
         try self.advance_to_next_byte();
         const label_start = self.idx;
+        // TODO allow unicode labels?
         try self.eat_name();
         try self.require_byte(',');
         const label = self.bytes[label_start..self.idx];

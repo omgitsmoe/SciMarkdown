@@ -23,7 +23,7 @@ pub const HTMLGenerator = struct {
         allocator: *std.mem.Allocator,
         start_node: *Node,
         label_ref_map: std.StringHashMap(*Node.LinkData)
-    ) !HTMLGenerator {
+    ) HTMLGenerator {
         return HTMLGenerator{
             .allocator = allocator,
             .html_buf = std.ArrayList(u8).init(allocator),
@@ -174,6 +174,20 @@ pub const HTMLGenerator = struct {
                         try self.html_buf.appendSlice("<sub>");
                     } else {
                         try self.html_buf.appendSlice("</sub>");
+                    }
+                },
+                .SmallCaps => {
+                    if (!node_info.is_end) {
+                        try self.html_buf.appendSlice("<span style=\"font-variant: small-caps;\">");
+                    } else {
+                        try self.html_buf.appendSlice("</span>");
+                    }
+                },
+                .Underline => {
+                    if (!node_info.is_end) {
+                        try self.html_buf.appendSlice("<u>");
+                    } else {
+                        try self.html_buf.appendSlice("</u>");
                     }
                 },
                 .CodeSpan => |code| {

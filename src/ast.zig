@@ -51,6 +51,10 @@ pub const Node = struct {
         // oterwise the union is getting way too big
         Image: struct { alt: []const u8, label: ?[]const u8, url: ?[]const u8, title: ?[]const u8 },
 
+        Citation,
+        Bibliography,
+        BibEntry: struct { id: []const u8 },
+
         Paragraph,
         BlankLine, // ?
 
@@ -75,6 +79,10 @@ pub const Node = struct {
         Strikethrough,
         Superscript,
         Subscript,
+        // TODO add syntax
+        SmallCaps,
+        // TODO add syntax?
+        Underline,
         Link: LinkData,
         // add SoftLineBreak ? are basically ignored and are represented by single \n
         HardLineBreak,
