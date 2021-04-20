@@ -1372,6 +1372,9 @@ pub const Parser = struct {
         // var in_param = true;
         var tok = self.peek_token();
         var last_end = tok.start;  // exclusive
+        // needed for switching to kwargs in the middle of in_pos_param
+        // so we only need to set this in .next_pos_param and .in_pos_param
+        var last_non_space = last_end;  // exclusive
         while (tok.token_kind != .Close_paren) : ({
             tok = self.peek_token();
         }) {
@@ -1386,6 +1389,7 @@ pub const Parser = struct {
                         else => {
                             state = .in_pos_param;
                             try self.parse_text(tok, current_arg);  // eats the tok
+                            last_non_space = tok.end;
                         },
                     }
                 },
@@ -1407,7 +1411,7 @@ pub const Parser = struct {
                         .Equals => {
                             current_arg.data = .{
                                 .KeywordArg = .{ 
-                                    .keyword = self.tokenizer.bytes[last_end..tok.start],
+                                    .keyword = self.tokenizer.bytes[last_end..last_non_space],
                                 },
                             };
                             state = State.next_kw_param;
@@ -1434,8 +1438,20 @@ pub const Parser = struct {
 
                             self.eat_token();
                         },
+                        .Space, .Tab => {
+                            try self.parse_text(tok, current_arg);  // eats the tok
+                        },
+                        .Newline => {
+                            Parser.report_error(
+                                "ln:{}: Newlines are not allowed inside parameter values!\n",
+                                .{ tok.line_nr });
+                            return ParseError.SyntaxError;
+                        },
                         // TODO handle and mb allow .Builtin_call? same for in_kw(_param)
-                        else => try self.parse_text(tok, current_arg),  // eats the tok
+                        else => {
+                            try self.parse_text(tok, current_arg);  // eats the tok
+                            last_non_space = tok.end;
+                        }
                     }
                 },
                 .next_kw => {
@@ -1510,6 +1526,12 @@ pub const Parser = struct {
                             };
 
                             self.eat_token();
+                        },
+                        .Newline => {
+                            Parser.report_error(
+                                "ln:{}: Newlines are not allowed inside parameter values!\n",
+                                .{ tok.line_nr });
+                            return ParseError.SyntaxError;
                         },
                         // TODO handle and mb allow .Builtin_call? same for in_kw(_param)
                         else => try self.parse_text(tok, current_arg),  // eats the tok
