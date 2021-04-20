@@ -305,20 +305,20 @@ This line is only separated by a single newline or space, so it's a separate lin
 %% In-text citation: @smith04 says blah.
 %%
 %% With locator: @smith04 [p. 33] says blah.
-Blah blah @cite(doe99, pre=see, loc=pp. 33-35, post=and *passim* & smith04, pre=also, loc=chap. 1)
+%% Blah blah @cite(doe99, pre=see, loc=pp. 33-35, post=and *passim* & smith04, pre=also, loc=chap. 1)
 
 %% cite only for one citation?
 %% Blah blah @cites(@cite(doe99, pre=see, loc=pp. 33-35, post=and *passim*),
 %% @cite(smith04, pre=also, loc=chap. 1))
 
-Blah blah @cites(@cite(doe99, loc=pp. 33-35), @cite(smith04))
+Blah blah @cites(@cite(abc99,   loc    =    pp. 33-35), @cite(smith04))
 
 Blah blah @cite(doe99, loc=pp. 33-35\, 38-39 and *passim*).
 
-Blah blah @cite(smith04 & doe99).
+%% Blah blah @cite(smith04 & doe99).
 
 Omit author name: Smith says blah @cite(-smith04).
 
 In-text citation: @textcite(smith04) says blah.
 
-With locator: @textcite(smith04, loc=p. 33) says blah.
+With locator: @textcite(smith04, loc=p. 33, error) says blah.

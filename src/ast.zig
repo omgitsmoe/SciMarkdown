@@ -35,6 +35,10 @@ pub const Node = struct {
         Document,
         Import,
 
+        BuiltinCall,
+        PostionalArg,
+        KeywordArg: struct { keyword: []const u8 },
+
         // block
         // leaf blocks
         ThematicBreak,
@@ -115,6 +119,28 @@ pub const Node = struct {
 
         child.parent = self;
     }
+
+    /// allocator has to be the allocator that node and it's direct children were
+    /// allocated with
+    /// Node's child must not have children of their own, otherwise they will be a leak
+    pub fn delete_direct_children(self: *Node, allocator: *std.mem.Allocator) void {
+        var mb_next = self.first_child;
+        while (mb_next) |next| {
+            mb_next = next.next;
+            std.debug.assert(next.first_child == null);
+            allocator.destroy(next);
+        }
+        self.first_child = null;
+        self.last_child = null;
+    }
+
+    pub fn print_direct_children(self: *Node) void {
+        var mb_next = self.first_child;
+        while (mb_next) |next| {
+            std.debug.print("Child: {}\n", .{ next.data });
+            mb_next = next.next;
+        }
+    }
 };
 
 pub inline fn is_container_block(self: NodeKind) bool {
@@ -143,6 +169,12 @@ pub inline fn is_inline(self: NodeKind) bool {
 pub inline fn can_hold(self: NodeKind, other: NodeKind) bool {
     if (is_container_block(self)) {
         return true;
+    } else if (other == .PostionalArg or other == .KeywordArg) {
+        if (self == .BuiltinCall) {
+            return true;
+        } else {
+            return false;
+        }
     } else {
         return if (is_inline(other)) true else false;
     }

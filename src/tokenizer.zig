@@ -20,8 +20,10 @@ pub const TokenKind = enum {
     Dash,
     Plus,
     Period,
+    Comma,
     Colon,
     Colon_open_bracket,
+    Equals,
     Bar,
     Caret,
     // TODO rename tokens to their function if they only have one single functionality?
@@ -62,6 +64,8 @@ pub const TokenKind = enum {
 
     Text,
 
+    Builtin_call,
+
     Eof,
 
     pub inline fn name(self: TokenKind) []const u8 {
@@ -78,9 +82,11 @@ pub const TokenKind = enum {
             .Dash => "-",
             .Plus => "+",
             .Period => ".",
+            .Comma => ",",
             .Colon => ":",
             .Colon_open_bracket => ":[",
             .Bar => "|",
+            .Equals => "=",
             .Caret => "^",
             .Dollar => "$",
             .Dollar_double => "$$",
@@ -116,6 +122,9 @@ pub const TokenKind = enum {
             .Comment => "(comment)",
             .Digits => "(digits)",
             .Text => "(text)",
+
+            .Builtin_call => "(@keyword)",
+
             .Eof => "(EOF)",
         };
     }
@@ -180,6 +189,7 @@ pub const Tokenizer = struct {
     pub const Error = error {
         UnmachtingDedent,
         BlankLineContainsWhiteSpace,
+        SuddenEndOfFile,
     };
 
     pub fn init(allocator: *std.mem.Allocator, filename: []const u8) !Tokenizer {
@@ -402,6 +412,7 @@ pub const Tokenizer = struct {
                 '+' => .Plus,
 
                 '.' => .Period,
+                ',' => .Comma,
                 ':' => blk: {
                     if (self.peek_next_byte() == @intCast(u8, '[')) {
                         self.prechecked_advance_to_next_byte();
@@ -412,6 +423,7 @@ pub const Tokenizer = struct {
                 },
                 '|' => .Bar,
                 '^' => .Caret,
+                '=' => .Equals,
                 '$' => blk: {
                     if (self.peek_next_byte() == @as(u8, '$')) {
                         self.prechecked_advance_to_next_byte();
@@ -517,13 +529,41 @@ pub const Tokenizer = struct {
 
                 },
 
+                '@' => blk: {
+                    if (self.peek_next_byte()) |next_byte| {
+                        self.prechecked_advance_to_next_byte();
+                        if (!utils.is_lowercase(next_byte)) {
+                            break :blk TokenKind.Text;
+                        }
+                    } else {
+                        break :blk TokenKind.Text;
+                    }
+                    // haven't hit eof but we're still on '@'
+                    self.prechecked_advance_to_next_byte();
+
+                    while (self.peek_next_byte()) |next_byte| : (self.prechecked_advance_to_next_byte()) {
+                        switch (next_byte) {
+                            'a'...'z', 'A'...'Z', '0'...'9', '_' => continue,
+                            else => break,
+                        }
+                    } else {
+                        // else -> break not hit
+                        Tokenizer.report_error(
+                            "ln:{}: Hit unexpected EOF while parsing builtin keyword (@keyword(...))\n",
+                            .{ self.line_count });
+                        return Error.SuddenEndOfFile;
+                    }
+
+                    break :blk TokenKind.Builtin_call;
+                },
+
                 // assuming text (no keywords currently)
                 else => blk: {
                     // consume everything that's not an inline style
                     while (self.peek_next_byte()) |next_byte| : (self.prechecked_advance_to_next_byte()) {
                         switch (next_byte) {
                             ' ', '\t', '\r', '\n', '_', '*', '/', '\\', '`',
-                            '<', '[', ']', ')', '"', '~', '^', '$' => break,
+                            '<', '[', ']', ')', '"', '~', '^', '$', '=' , ',', '@' => break,
                             else => {},
                         }
                     }

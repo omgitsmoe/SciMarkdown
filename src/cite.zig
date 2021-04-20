@@ -42,7 +42,11 @@ pub const Format = enum {
 
 /// will use json's memory for strings
 /// caller takes ownership
-pub fn nodes_from_citeproc_json(allocator: *std.mem.Allocator, json: []const u8) ![2][]*Node {
+pub fn nodes_from_citeproc_json(
+    allocator: *std.mem.Allocator,
+    json: []const u8,
+    cite_nodes: []*Node  // NodeKind.Citation nodes in the same order as citations were passed to citeproc
+) ![]*Node {
     // NOTE: either use the Parser and keep the ValueTree and generate formatted
     // strings from that directly or use json.TokenStream to generate
     // CiteprocResult from that 'manually'
@@ -50,15 +54,12 @@ pub fn nodes_from_citeproc_json(allocator: *std.mem.Allocator, json: []const u8)
     const json_tree = try stream.parse(json);
     //std.debug.print("Result:\n{}\n", .{ citeproc_result.root });
 
-    var citation_nodes = std.ArrayList(*Node).init(allocator);
     var bib_nodes = std.ArrayList(*Node).init(allocator);
 
     const citations = &json_tree.root.Object.getEntry("citations").?.value;
-    for (citations.Array.items) |citation| {
-        const cite_node = try Node.create(allocator);
-        cite_node.data = .Citation;
-        try citation_nodes.append(cite_node);
-        try nodes_from_formatted(allocator, citation.Array.items, cite_node);
+    std.debug.assert(citations.Array.items.len == cite_nodes.len);
+    for (citations.Array.items) |citation, i| {
+        try nodes_from_formatted(allocator, citation.Array.items, cite_nodes[i]);
     }
 
     const bibliography = &json_tree.root.Object.getEntry("bibliography").?.value;
@@ -76,7 +77,7 @@ pub fn nodes_from_citeproc_json(allocator: *std.mem.Allocator, json: []const u8)
             allocator, bib_entry.Array.items[1].Array.items, entry_node);
     }
 
-    return [2][]*Node { citation_nodes.toOwnedSlice(), bib_nodes.toOwnedSlice() };
+    return bib_nodes.toOwnedSlice();
 }
 
 /// adds formatted ast.Nodes to first_parent from a Citeproc formatted string in json

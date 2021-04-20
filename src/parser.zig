@@ -1039,7 +1039,7 @@ pub const Parser = struct {
                 //  check if a digit follows immediately after and then just parse it as text
                 //  so often used $xx for prices doesn't need to be escaped (how pandoc does it)
                 if (self.peek_next_token().token_kind == TokenKind.Digits) {
-                    try self.parse_text(token);
+                    try self.parse_text(token, self.get_last_block());
                     return true;
                 }
                 self.eat_token();
@@ -1074,14 +1074,17 @@ pub const Parser = struct {
             TokenKind.Open_bracket => {
                 try self.parse_link();
             },
+            TokenKind.Builtin_call => {
+                try self.parse_builtin(token, null);
+            },
             else => {
-                try self.parse_text(token);
+                try self.parse_text(token, self.get_last_block());
             },
         }
         return true;
     }
 
-    inline fn parse_text(self: *Parser, token: *Token) ParseError!void {
+    inline fn parse_text(self: *Parser, token: *Token, parent: *Node) ParseError!void {
         if (self.last_text_node) |continue_text| {
             // enlarge slice by directly manipulating the length (which is allowed in zig)
             // TODO backslash escaped text will result in faulty text, since the
@@ -1093,7 +1096,6 @@ pub const Parser = struct {
             // std.debug.print("ln:{}: Enlarged text node: {}\n",
             //     .{ token.line_nr, continue_text.data.Text.text });
         } else {
-            const parent = self.get_last_block();
             var text_node = try self.new_node(parent);
             text_node.data = .{
                 .Text = .{ .text =  self.tokenizer.bytes[token.start..token.end] },
@@ -1338,5 +1340,360 @@ pub const Parser = struct {
         }
 
         std.debug.print("Link dest: {}\n", .{ link_or_ref.data });
+    }
+
+    fn parse_builtin(self: *Parser, start_token: *Token, parent: ?*Node) ParseError!void {
+        self.eat_token();  // eat start_token
+        try self.require_token(
+            .Open_paren, ". Calling a builtin should look like: @builtin(arg, kwarg=..)\n");
+        self.eat_token();
+        
+        var builtin = try self.new_node(if (parent) |par| par else self.get_last_block());
+        builtin.data = .BuiltinCall;
+
+        var current_arg = try self.new_node(builtin);
+        current_arg.data = .PostionalArg;
+        std.debug.print("Parsing builtin\n", .{});
+
+        const State = enum {
+            next_pos_param,
+            in_pos_param,
+            // only expect kw_params after the first one
+            next_kw,
+            in_kw,
+            after_kw,
+            next_kw_param,
+            in_kw_param,
+        };
+            
+        var state = State.next_pos_param;
+        // var kw_params = false;
+        // var hit_equals = false;
+        // var in_param = true;
+        var tok = self.peek_token();
+        var last_end = tok.start;  // exclusive
+        while (tok.token_kind != .Close_paren) : ({
+            tok = self.peek_token();
+        }) {
+            switch (state) {
+                .next_pos_param => {
+                    switch (tok.token_kind) {
+                        .Space, .Tab, .Newline => {
+                            last_end += 1;
+                            self.eat_token();
+                        },
+                        .Builtin_call => try self.parse_builtin(tok, builtin),
+                        else => {
+                            state = .in_pos_param;
+                            try self.parse_text(tok, current_arg);  // eats the tok
+                        },
+                    }
+                },
+                .next_kw_param => {
+                    switch (tok.token_kind) {
+                        .Space, .Tab, .Newline => {
+                            last_end += 1;
+                            self.eat_token();
+                        },
+                        .Builtin_call => try self.parse_builtin(tok, builtin),
+                        else => {
+                            state = .in_kw_param;
+                            try self.parse_text(tok, current_arg);  // eats the tok
+                        },
+                    }
+                },
+                .in_pos_param => {
+                    switch (tok.token_kind) {
+                        .Equals => {
+                            current_arg.data = .{
+                                .KeywordArg = .{ 
+                                    .keyword = self.tokenizer.bytes[last_end..tok.start],
+                                },
+                            };
+                            state = State.next_kw_param;
+                            last_end = tok.end;
+
+                            // delete text node that was created as the first param
+                            // TODO maybe force to use double quotes?
+                            self.last_text_node = null;
+                            current_arg.delete_direct_children(&self.node_arena.allocator);
+                            self.eat_token();
+                        },
+                        .Comma => {
+                            current_arg = try self.new_node(builtin);
+                            current_arg.data = .PostionalArg;
+                            state = .next_pos_param;
+
+                            self.last_text_node = null;
+                            last_end = tok.end;
+
+                            std.debug.print(
+                                "ln:{}: Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
+                            current_arg.print_direct_children();
+
+                            self.eat_token();
+                        },
+                        // TODO handle and mb allow .Builtin_call? same for in_kw(_param)
+                        else => try self.parse_text(tok, current_arg),  // eats the tok
+                    }
+                },
+                .next_kw => {
+                    switch (tok.token_kind) {
+                        .Space, .Tab, .Newline => {
+                            last_end += 1;
+                            self.eat_token();
+                        },
+                        .Builtin_call => {
+                            Parser.report_error(
+                                "ln:{}: Expected keyword got {}!\n",
+                                .{ start_token.line_nr, tok.token_kind.name() });
+                            return ParseError.SyntaxError;
+                        },
+                        else => {
+                            state = .in_kw;
+                            try self.parse_text(tok, current_arg);  // eats the tok
+                        },
+                    }
+                },
+                .in_kw => {
+                    switch (tok.token_kind) {
+                        .Space, .Tab, .Newline => {
+                            state = .after_kw;
+
+                            current_arg.data.KeywordArg.keyword =
+                                self.tokenizer.bytes[last_end..tok.start];
+                            last_end = tok.end;
+                            self.eat_token();
+                        },
+                        .Builtin_call => return ParseError.SyntaxError,
+                        else => {
+                            self.eat_token();
+                        },
+                    }
+                },
+                .after_kw => {
+                    switch (tok.token_kind) {
+                        .Space, .Tab, .Newline => {
+                            self.eat_token();
+                        },
+                        .Builtin_call => return ParseError.SyntaxError,
+                        .Equals => {
+                            state = .next_kw_param;
+                            last_end = tok.end;
+                            self.eat_token();
+                        },
+                        else => {
+                            Parser.report_error(
+                                "ln:{}: Expected '=' got {}!\n",
+                                .{ start_token.line_nr, tok.token_kind.name() });
+                            return ParseError.SyntaxError;
+                        },
+                    }
+                },
+                .in_kw_param => {
+                    switch (tok.token_kind) {
+                        .Comma => {
+                            current_arg = try self.new_node(builtin);
+                            current_arg.data = .{
+                                .KeywordArg = .{
+                                    .keyword = undefined,
+                                },
+                            };
+                            state = .next_kw;
+                            last_end = tok.end;
+
+                            self.last_text_node = null;
+                            std.debug.print(
+                                "ln:{}: Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
+                            current_arg.print_direct_children();
+                            self.eat_token();
+                        },
+                        // TODO handle and mb allow .Builtin_call? same for in_kw(_param)
+                        else => try self.parse_text(tok, current_arg),  // eats the tok
+                    }
+                },
+            }
+            // UNDONE alt version switching on token_kind first:
+            // switch (tok.token_kind) {
+            //     .Space, .Tab => {
+            //         switch (state) {
+            //             .next_pos_param, .next_kw, .next_kw_param => {
+            //                 last_end += 1;
+            //                 self.eat_token();
+            //                 continue;
+            //             },
+            //             else => try self.parse_text(tok, current_arg);  // eats the tok
+            //         }
+            //     },
+            //     .Newline => {
+            //         switch (state) {
+            //             .next_pos_param, .next_kw, .next_kw_param => {
+            //                 last_end += 1;
+            //                 self.eat_token();
+            //                 continue;
+            //             },
+            //             else => {
+            //                 Parser.report_error(
+            //                     "ln:{}: Line breaks are not allowed inside parameter " ++
+            //                     "values, only inbetween them!\n", .{ start_token.line_nr });
+            //                 return ParseError.SyntaxError;
+            //             },
+            //         }
+            //     },
+            //     .Equals => {
+            //         switch (state) {
+            //             .in_pos_param => {
+            //                 current_arg.data = .{
+            //                     .KeywordArg = .{ 
+            //                         .keyword = self.tokenizer.bytes[last_end..tok.start],
+            //                     },
+            //                 };
+            //                 state = State.next_kw_param;
+            //                 last_end = tok.end;
+
+            //                 // delete text node that was created as the first param
+            //                 // TODO maybe force to use double quotes?
+            //                 self.last_text_node = null;
+            //                 current_arg.delete_direct_children(&self.node_arena.allocator);
+            //             },
+            //             .in_kw => {
+            //                 last_end = tok.end;
+            //                 state = State.next_kw_param;
+            //                 current_arg.data.KeywordArg.keyword =
+            //                     self.tokenizer.bytes[last_end..tok.start];
+            //             },
+            //             .next_kw => {
+            //                 Parser.report_error(
+            //                     "ln:{}: Parameter keywords can't contain '='!\n", .{ start_token.line_nr });
+            //                 return ParseError.SyntaxError;
+            //             },
+            //             .next_pos_param => {
+            //                 try self.parse_text(tok, current_arg);  // eats the tok
+            //                 state = .in_pos_param;
+            //             },
+            //             .next_kw_param => {
+            //                 try self.parse_text(tok, current_arg);  // eats the tok
+            //                 state = .in_kw_param;
+            //             },
+            //             .in_kw_param => try self.parse_text(tok, current_arg),  // eats the tok
+            //         }
+            //         self.eat_token();
+            //     },
+            //     .Comma => {
+            //         switch (state) {
+            //             .next_pos_param, .next_kw, .next_kw_param => {
+            //                 Parser.report_error(
+            //                     "ln:{}: Encountered extra comma!\n",
+            //                     .{ tok.line_nr });
+            //                 return ParseError.SyntaxError;
+            //             },
+            //             .in_kw => {
+            //                 Parser.report_error(
+            //                     "ln:{}: Encountered postional argument after keyword argument!\n",
+            //                     .{ tok.line_nr });
+            //                 return ParseError.SyntaxError;
+            //             },
+            //             .in_pos_param => {
+            //                 current_arg = try self.new_node(builtin);
+            //                 current_arg.data = .PostionalArg;
+            //                 state = .next_pos_param;
+            //             },
+            //             .in_kw_param => {
+            //                 current_arg = try self.new_node(builtin);
+            //                 current_arg.data = .{
+            //                     .KeywordArg = .{
+            //                         .keyword = undefined,
+            //                     },
+            //                 };
+            //                 state = .next_kw;
+            //             },
+            //         }
+
+            //         self.last_text_node = null;
+            //         last_end = tok.end;
+
+            //         std.debug.print("ln:{}: Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
+            //         current_arg.print_direct_children();
+
+            //         self.eat_token();
+            //     },
+            //     TokenKind.Builtin_call => {
+            //         switch (state) {
+            //             .next_kw => {
+            //                 Parser.report_error(
+            //                     "ln:{}: Expected keyword got {}!\n",
+            //                     .{ start_token.line_nr, tok.token_kind.name() });
+            //                 return ParseError.SyntaxError;
+            //             },
+            //             .in_kw, .in_pos_param, .in_kw_param => {
+            //                 // TODO allow this?
+            //                 Parser.report_error(
+            //                     "ln:{}: Encountered {} in the middle of parameter value!\n",
+            //                     .{ start_token.line_nr, tok.token_kind.name() });
+            //                 return ParseError.SyntaxError;
+            //             },
+            //             else => {},
+            //         }
+            //         try self.parse_builtin(tok, builtin);
+            //     },
+            //     TokenKind.Eof => {
+            //         Parser.report_error(
+            //             "ln:{}: Encountered EOF while parsing builtin argmuments!\n",
+            //             .{ start_token.line_nr });
+            //         return ParseError.SyntaxError;
+            //     },
+            //     'a'...'z' => {
+            //     },
+            //     else => {
+            //         if (!kw_params) {
+            //             in_param = true;
+            //         } else if (hit_equals) {
+            //             in_param = true;
+            //         }
+            //         if (in_param) {
+            //             try self.parse_text(tok, current_arg);  // eats the tok
+            //         } else {
+            //             self.eat_token();
+            //         }
+            //     },
+            // }
+        }
+        // finish last param
+        // if (kw_params and !hit_equals) {
+        //     Parser.report_error(
+        //         "ln:{}: Encountered postional argument after keyword argument!\n",
+        //         .{ tok.line_nr });
+        //     return ParseError.SyntaxError;
+        // }
+
+        switch (state) {
+            .in_kw, .after_kw, => {
+                Parser.report_error(
+                    "ln:{}: Encountered postional argument after keyword argument!\n",
+                    .{ start_token.line_nr });
+                return ParseError.SyntaxError;
+            },
+            .next_kw_param => {
+                Parser.report_error(
+                    "ln:{}: Missing keyword parameter value!\n",
+                    .{ start_token.line_nr });
+                return ParseError.SyntaxError;
+            },
+            .next_kw, .next_pos_param,  // ignore extra comma e.g. @kw(abc, def,)
+            .in_pos_param, .in_kw_param => {
+                self.last_text_node = null;
+                std.debug.print("ln:{}: Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
+                current_arg.print_direct_children();
+            },
+        }
+
+        self.eat_token();  // eat )
+
+        // if (std.mem.eql(u8, keyword, "@cite")) {
+        // } else if (std.mem.eql(u8, keyword, "@cites")) {
+        // } else if (std.mem.eql(u8, keyword, "@textcite")) {
+        // }  else {
+        //     // TODO error here
+        // }
     }
 };

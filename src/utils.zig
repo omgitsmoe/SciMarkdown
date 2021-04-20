@@ -102,6 +102,7 @@ pub fn DepthFirstIterator(
     };
 }
 
+/// all of the string is_.. functions are ascii only!!
 pub inline fn is_alpha(char: u8) bool {
     if ((char >= 'A' and char <= 'Z') or
         (char >= 'a' and char <= 'z')) {
