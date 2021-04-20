@@ -1420,16 +1420,17 @@ pub const Parser = struct {
                             self.eat_token();
                         },
                         .Comma => {
-                            current_arg = try self.new_node(builtin);
-                            current_arg.data = .PostionalArg;
+                            std.debug.print(
+                                "ln:{}: Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
+                            current_arg.print_direct_children();
+
                             state = .next_pos_param;
 
                             self.last_text_node = null;
                             last_end = tok.end;
 
-                            std.debug.print(
-                                "ln:{}: Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
-                            current_arg.print_direct_children();
+                            current_arg = try self.new_node(builtin);
+                            current_arg.data = .PostionalArg;
 
                             self.eat_token();
                         },
@@ -1493,19 +1494,21 @@ pub const Parser = struct {
                 .in_kw_param => {
                     switch (tok.token_kind) {
                         .Comma => {
+                            std.debug.print(
+                                "ln:{}: Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
+                            current_arg.print_direct_children();
+
+                            state = .next_kw;
+                            last_end = tok.end;
+                            self.last_text_node = null;
+
                             current_arg = try self.new_node(builtin);
                             current_arg.data = .{
                                 .KeywordArg = .{
                                     .keyword = undefined,
                                 },
                             };
-                            state = .next_kw;
-                            last_end = tok.end;
 
-                            self.last_text_node = null;
-                            std.debug.print(
-                                "ln:{}: Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
-                            current_arg.print_direct_children();
                             self.eat_token();
                         },
                         // TODO handle and mb allow .Builtin_call? same for in_kw(_param)
@@ -1513,159 +1516,7 @@ pub const Parser = struct {
                     }
                 },
             }
-            // UNDONE alt version switching on token_kind first:
-            // switch (tok.token_kind) {
-            //     .Space, .Tab => {
-            //         switch (state) {
-            //             .next_pos_param, .next_kw, .next_kw_param => {
-            //                 last_end += 1;
-            //                 self.eat_token();
-            //                 continue;
-            //             },
-            //             else => try self.parse_text(tok, current_arg);  // eats the tok
-            //         }
-            //     },
-            //     .Newline => {
-            //         switch (state) {
-            //             .next_pos_param, .next_kw, .next_kw_param => {
-            //                 last_end += 1;
-            //                 self.eat_token();
-            //                 continue;
-            //             },
-            //             else => {
-            //                 Parser.report_error(
-            //                     "ln:{}: Line breaks are not allowed inside parameter " ++
-            //                     "values, only inbetween them!\n", .{ start_token.line_nr });
-            //                 return ParseError.SyntaxError;
-            //             },
-            //         }
-            //     },
-            //     .Equals => {
-            //         switch (state) {
-            //             .in_pos_param => {
-            //                 current_arg.data = .{
-            //                     .KeywordArg = .{ 
-            //                         .keyword = self.tokenizer.bytes[last_end..tok.start],
-            //                     },
-            //                 };
-            //                 state = State.next_kw_param;
-            //                 last_end = tok.end;
-
-            //                 // delete text node that was created as the first param
-            //                 // TODO maybe force to use double quotes?
-            //                 self.last_text_node = null;
-            //                 current_arg.delete_direct_children(&self.node_arena.allocator);
-            //             },
-            //             .in_kw => {
-            //                 last_end = tok.end;
-            //                 state = State.next_kw_param;
-            //                 current_arg.data.KeywordArg.keyword =
-            //                     self.tokenizer.bytes[last_end..tok.start];
-            //             },
-            //             .next_kw => {
-            //                 Parser.report_error(
-            //                     "ln:{}: Parameter keywords can't contain '='!\n", .{ start_token.line_nr });
-            //                 return ParseError.SyntaxError;
-            //             },
-            //             .next_pos_param => {
-            //                 try self.parse_text(tok, current_arg);  // eats the tok
-            //                 state = .in_pos_param;
-            //             },
-            //             .next_kw_param => {
-            //                 try self.parse_text(tok, current_arg);  // eats the tok
-            //                 state = .in_kw_param;
-            //             },
-            //             .in_kw_param => try self.parse_text(tok, current_arg),  // eats the tok
-            //         }
-            //         self.eat_token();
-            //     },
-            //     .Comma => {
-            //         switch (state) {
-            //             .next_pos_param, .next_kw, .next_kw_param => {
-            //                 Parser.report_error(
-            //                     "ln:{}: Encountered extra comma!\n",
-            //                     .{ tok.line_nr });
-            //                 return ParseError.SyntaxError;
-            //             },
-            //             .in_kw => {
-            //                 Parser.report_error(
-            //                     "ln:{}: Encountered postional argument after keyword argument!\n",
-            //                     .{ tok.line_nr });
-            //                 return ParseError.SyntaxError;
-            //             },
-            //             .in_pos_param => {
-            //                 current_arg = try self.new_node(builtin);
-            //                 current_arg.data = .PostionalArg;
-            //                 state = .next_pos_param;
-            //             },
-            //             .in_kw_param => {
-            //                 current_arg = try self.new_node(builtin);
-            //                 current_arg.data = .{
-            //                     .KeywordArg = .{
-            //                         .keyword = undefined,
-            //                     },
-            //                 };
-            //                 state = .next_kw;
-            //             },
-            //         }
-
-            //         self.last_text_node = null;
-            //         last_end = tok.end;
-
-            //         std.debug.print("ln:{}: Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
-            //         current_arg.print_direct_children();
-
-            //         self.eat_token();
-            //     },
-            //     TokenKind.Builtin_call => {
-            //         switch (state) {
-            //             .next_kw => {
-            //                 Parser.report_error(
-            //                     "ln:{}: Expected keyword got {}!\n",
-            //                     .{ start_token.line_nr, tok.token_kind.name() });
-            //                 return ParseError.SyntaxError;
-            //             },
-            //             .in_kw, .in_pos_param, .in_kw_param => {
-            //                 // TODO allow this?
-            //                 Parser.report_error(
-            //                     "ln:{}: Encountered {} in the middle of parameter value!\n",
-            //                     .{ start_token.line_nr, tok.token_kind.name() });
-            //                 return ParseError.SyntaxError;
-            //             },
-            //             else => {},
-            //         }
-            //         try self.parse_builtin(tok, builtin);
-            //     },
-            //     TokenKind.Eof => {
-            //         Parser.report_error(
-            //             "ln:{}: Encountered EOF while parsing builtin argmuments!\n",
-            //             .{ start_token.line_nr });
-            //         return ParseError.SyntaxError;
-            //     },
-            //     'a'...'z' => {
-            //     },
-            //     else => {
-            //         if (!kw_params) {
-            //             in_param = true;
-            //         } else if (hit_equals) {
-            //             in_param = true;
-            //         }
-            //         if (in_param) {
-            //             try self.parse_text(tok, current_arg);  // eats the tok
-            //         } else {
-            //             self.eat_token();
-            //         }
-            //     },
-            // }
         }
-        // finish last param
-        // if (kw_params and !hit_equals) {
-        //     Parser.report_error(
-        //         "ln:{}: Encountered postional argument after keyword argument!\n",
-        //         .{ tok.line_nr });
-        //     return ParseError.SyntaxError;
-        // }
-
         switch (state) {
             .in_kw, .after_kw, => {
                 Parser.report_error(
@@ -1682,7 +1533,7 @@ pub const Parser = struct {
             .next_kw, .next_pos_param,  // ignore extra comma e.g. @kw(abc, def,)
             .in_pos_param, .in_kw_param => {
                 self.last_text_node = null;
-                std.debug.print("ln:{}: Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
+                std.debug.print("ln:{}: LAST Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
                 current_arg.print_direct_children();
             },
         }
