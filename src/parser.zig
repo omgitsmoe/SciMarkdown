@@ -721,7 +721,9 @@ pub const Parser = struct {
     fn can_list_continue(
         self: *Parser,
         comptime new_list: NodeKind,
-        start_token: *Token,
+        // instead of making this a *const Token we could also just pass this as Token
+        // and let the compiler decide whether it's more efficient to pass by value or ref
+        start_token: *const Token,
         prev_line_blank: bool
     ) bool {
         const last_block_data = self.get_last_block().data;
@@ -773,7 +775,7 @@ pub const Parser = struct {
         unreachable;
     }
 
-    fn parse_ordered_list(self: *Parser, start_token: *Token, prev_line_blank: bool) ParseError!void {
+    fn parse_ordered_list(self: *Parser, start_token: *const Token, prev_line_blank: bool) ParseError!void {
         try self.handle_open_blocks(NodeKind.OrderedListItem, start_token.column, prev_line_blank);
 
         // TODO use start number
@@ -801,7 +803,7 @@ pub const Parser = struct {
         self.open_block(list_item_node);
     }
 
-    fn parse_unordered_list(self: *Parser, start_token: *Token, prev_line_blank: bool) ParseError!void {
+    fn parse_unordered_list(self: *Parser, start_token: *const Token, prev_line_blank: bool) ParseError!void {
         try self.handle_open_blocks(NodeKind.UnorderedListItem, start_token.column, prev_line_blank);
         // if one blank line is present in the contents of any of the list items
         // the list will be loose
@@ -1084,7 +1086,7 @@ pub const Parser = struct {
         return true;
     }
 
-    inline fn parse_text(self: *Parser, token: *Token, parent: *Node) ParseError!void {
+    inline fn parse_text(self: *Parser, token: *const Token, parent: *Node) ParseError!void {
         if (self.last_text_node) |continue_text| {
             // enlarge slice by directly manipulating the length (which is allowed in zig)
             // TODO backslash escaped text will result in faulty text, since the
@@ -1342,7 +1344,7 @@ pub const Parser = struct {
         std.debug.print("Link dest: {}\n", .{ link_or_ref.data });
     }
 
-    fn parse_builtin(self: *Parser, start_token: *Token, parent: ?*Node) ParseError!void {
+    fn parse_builtin(self: *Parser, start_token: *const Token, parent: ?*Node) ParseError!void {
         self.eat_token();  // eat start_token
         try self.require_token(
             .Open_paren, ". Calling a builtin should look like: @builtin(arg, kwarg=..)\n");
@@ -1385,7 +1387,31 @@ pub const Parser = struct {
                             last_end += 1;
                             self.eat_token();
                         },
-                        .Builtin_call => try self.parse_builtin(tok, builtin),
+                        .Builtin_call => {
+                            try self.parse_builtin(tok, builtin);
+                            // we either need a after_pos_param state (which would mean
+                            // after_kw_param is needed as well) or we can skip all whitespace
+                            // till we hit the comma
+                            // TODO iterator? that erros on eof
+                            while (true) {
+                                tok = self.peek_token();
+                                switch (tok.token_kind) {
+                                    .Comma, .Close_paren => {
+                                        state = .in_pos_param;  // so ',' gets treated as finisher
+                                        break;
+                                    },
+                                    .Space, .Tab => {},
+                                    else => {
+                                        Parser.report_error(
+                                            "ln:{}: Hit '{}' while waiting for param delimiter ','" ++
+                                            " or call closer ')' when parsing a builtin call!\n",
+                                            .{ start_token.line_nr, tok.token_kind.name() });
+                                        return ParseError.SyntaxError;
+                                    },
+                                }
+                                self.eat_token();
+                            }
+                        },
                         else => {
                             state = .in_pos_param;
                             try self.parse_text(tok, current_arg);  // eats the tok
@@ -1399,7 +1425,27 @@ pub const Parser = struct {
                             last_end += 1;
                             self.eat_token();
                         },
-                        .Builtin_call => try self.parse_builtin(tok, builtin),
+                        .Builtin_call => {
+                            try self.parse_builtin(tok, builtin);
+                            while (true) {
+                                tok = self.peek_token();
+                                switch (tok.token_kind) {
+                                    .Comma, .Close_paren => {
+                                        state = .in_kw_param;  // so ',' gets treated as finisher
+                                        break;
+                                    },
+                                    .Space, .Tab => {},
+                                    else => {
+                                        Parser.report_error(
+                                            "ln:{}: Hit '{}' while waiting for param delimiter ','" ++
+                                            " or call closer ')' when parsing a builtin call!\n",
+                                            .{ start_token.line_nr, tok.token_kind.name() });
+                                        return ParseError.SyntaxError;
+                                    },
+                                }
+                                self.eat_token();
+                            }
+                        },
                         else => {
                             state = .in_kw_param;
                             try self.parse_text(tok, current_arg);  // eats the tok
@@ -1447,7 +1493,7 @@ pub const Parser = struct {
                                 .{ tok.line_nr });
                             return ParseError.SyntaxError;
                         },
-                        // TODO handle and mb allow .Builtin_call? same for in_kw(_param)
+                        // TODO handle and mb allow .Builtin_call? same for in_kw_param
                         else => {
                             try self.parse_text(tok, current_arg);  // eats the tok
                             last_non_space = tok.end;
@@ -1460,15 +1506,15 @@ pub const Parser = struct {
                             last_end += 1;
                             self.eat_token();
                         },
-                        .Builtin_call => {
+                        .Text, .Underscore => {
+                            state = .in_kw;
+                            try self.parse_text(tok, current_arg);  // eats the tok
+                        },
+                        else => {
                             Parser.report_error(
                                 "ln:{}: Expected keyword got {}!\n",
                                 .{ start_token.line_nr, tok.token_kind.name() });
                             return ParseError.SyntaxError;
-                        },
-                        else => {
-                            state = .in_kw;
-                            try self.parse_text(tok, current_arg);  // eats the tok
                         },
                     }
                 },
@@ -1533,7 +1579,7 @@ pub const Parser = struct {
                                 .{ tok.line_nr });
                             return ParseError.SyntaxError;
                         },
-                        // TODO handle and mb allow .Builtin_call? same for in_kw(_param)
+                        // TODO handle and mb allow .Builtin_call? same for in_kw_param
                         else => try self.parse_text(tok, current_arg),  // eats the tok
                     }
                 },
