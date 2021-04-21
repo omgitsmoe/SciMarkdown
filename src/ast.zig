@@ -5,6 +5,8 @@ const TokenKind = tokenizer.TokenKind;
 
 const Language = @import("code_chunks.zig").Language;
 
+const builtin = @import("builtin.zig");
+
 // meta.TagType gets union's enum tag type (by using @typeInfo(T).tag_type)
 pub const NodeKind = std.meta.TagType(Node.NodeData);
 pub const Node = struct {
@@ -35,7 +37,7 @@ pub const Node = struct {
         Document,
         Import,
 
-        BuiltinCall,
+        BuiltinCall: struct { builtin_type: builtin.BuiltinCall },
         PostionalArg,
         KeywordArg: struct { keyword: []const u8 },
 

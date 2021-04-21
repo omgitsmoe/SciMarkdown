@@ -12,6 +12,12 @@ const NodeKind = ast.NodeKind;
 const code_chunks = @import("code_chunks.zig");
 const Language = code_chunks.Language;
 
+const csl = @import("csl_json.zig");
+
+const bic = @import("builtin.zig");
+const BuiltinCall = bic.BuiltinCall;
+const builtin_call_info = bic.builtin_call_info;
+
 pub const Parser = struct {
     allocator: *std.mem.Allocator,
     node_arena: std.heap.ArenaAllocator,
@@ -54,6 +60,7 @@ pub const Parser = struct {
         OutOfMemory,
         SyntaxError,
         ExceededOrderedListDigits,
+        BuiltinCallFailed,
     };
 
     pub fn init(allocator: *std.mem.Allocator, filename: []const u8) !Parser {
@@ -1351,7 +1358,21 @@ pub const Parser = struct {
         self.eat_token();
         
         var builtin = try self.new_node(if (parent) |par| par else self.get_last_block());
-        builtin.data = .BuiltinCall;
+
+        // start + 1 since the @ is included
+        const keyword = self.tokenizer.bytes[start_token.start + 1..start_token.end];
+        const mb_builtin_type = std.meta.stringToEnum(BuiltinCall, keyword);
+        std.debug.print("Type: {}\n", .{ mb_builtin_type });
+        if (mb_builtin_type) |bi_type| {
+            builtin.data = .{
+                .BuiltinCall = .{ .builtin_type = bi_type }
+            };
+        } else {
+            Parser.report_error(
+                "ln:{}: Unrecognized builtin: '{}'\n",
+                .{ start_token.line_nr, keyword });
+            return ParseError.SyntaxError;
+        }
 
         var current_arg = try self.new_node(builtin);
         current_arg.data = .PostionalArg;
@@ -1377,6 +1398,8 @@ pub const Parser = struct {
         // needed for switching to kwargs in the middle of in_pos_param
         // so we only need to set this in .next_pos_param and .in_pos_param
         var last_non_space = last_end;  // exclusive
+        var pos_params: u16 = 0;
+        var kw_params:  u16 = 0;
         while (tok.token_kind != .Close_paren) : ({
             tok = self.peek_token();
         }) {
@@ -1388,7 +1411,7 @@ pub const Parser = struct {
                             self.eat_token();
                         },
                         .Builtin_call => {
-                            try self.parse_builtin(tok, builtin);
+                            try self.parse_builtin(tok, current_arg);
                             // we either need a after_pos_param state (which would mean
                             // after_kw_param is needed as well) or we can skip all whitespace
                             // till we hit the comma
@@ -1426,7 +1449,7 @@ pub const Parser = struct {
                             self.eat_token();
                         },
                         .Builtin_call => {
-                            try self.parse_builtin(tok, builtin);
+                            try self.parse_builtin(tok, current_arg);
                             while (true) {
                                 tok = self.peek_token();
                                 switch (tok.token_kind) {
@@ -1478,6 +1501,7 @@ pub const Parser = struct {
 
                             self.last_text_node = null;
                             last_end = tok.end;
+                            pos_params += 1;
 
                             current_arg = try self.new_node(builtin);
                             current_arg.data = .PostionalArg;
@@ -1562,6 +1586,7 @@ pub const Parser = struct {
 
                             state = .next_kw;
                             last_end = tok.end;
+                            kw_params += 1;
                             self.last_text_node = null;
 
                             current_arg = try self.new_node(builtin);
@@ -1601,6 +1626,11 @@ pub const Parser = struct {
             .next_kw, .next_pos_param,  // ignore extra comma e.g. @kw(abc, def,)
             .in_pos_param, .in_kw_param => {
                 self.last_text_node = null;
+                switch (state) {
+                    .in_pos_param => pos_params += 1,
+                    .in_kw_param => kw_params += 1,
+                    else => {},
+                }
                 std.debug.print("ln:{}: LAST Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
                 current_arg.print_direct_children();
             },
@@ -1608,11 +1638,26 @@ pub const Parser = struct {
 
         self.eat_token();  // eat )
 
-        // if (std.mem.eql(u8, keyword, "@cite")) {
-        // } else if (std.mem.eql(u8, keyword, "@cites")) {
-        // } else if (std.mem.eql(u8, keyword, "@textcite")) {
-        // }  else {
-        //     // TODO error here
-        // }
+        std.debug.print(
+            "ln:{}: Finished builtin: {} pos: {}, kw: {}\n",
+            .{ start_token.line_nr, self.tokenizer.bytes[start_token.start..start_token.end],
+               pos_params, kw_params });
+
+        const bc_info = builtin_call_info[@enumToInt(mb_builtin_type.?)];
+        if (bc_info.pos_params > 0 and pos_params != bc_info.pos_params) {
+            Parser.report_error(
+                "ln:{}: Expected {} positional arguments, found {} for builtin '{}'\n",
+                .{ start_token.line_nr, bc_info.pos_params, pos_params, keyword });
+            return ParseError.SyntaxError;
+        } else if (kw_params > bc_info.kw_params) {
+            Parser.report_error(
+                "ln:{}: Expected a maximum of {} keyword arguments, found {} for builtin '{}'\n",
+                .{ start_token.line_nr, bc_info.kw_params, kw_params, keyword });
+            return ParseError.SyntaxError;
+        }
+
+        _ = bic.evaluate_builtin(self.allocator, builtin, mb_builtin_type.?, .{}) catch {
+            return ParseError.BuiltinCallFailed;
+        };
     }
 };
