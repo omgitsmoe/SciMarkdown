@@ -43,6 +43,8 @@ pub const Parser = struct {
     open_blocks: [50]*Node,
     open_block_idx: u8,
 
+    bibliography: ?*Node = null,
+
     // each error name across the entire compilation gets assigned an unsigned
     // integer greater than 0. You are allowed to declare the same error name
     // more than once, and if you do, it gets assigned the same integer value
@@ -1649,7 +1651,7 @@ pub const Parser = struct {
                pos_params, kw_params });
 
         const bc_info = builtin_call_info[@enumToInt(mb_builtin_type.?)];
-        if (bc_info.pos_params > 0 and pos_params != bc_info.pos_params) {
+        if (bc_info.pos_params >= 0 and pos_params != bc_info.pos_params) {
             Parser.report_error(
                 "ln:{}: Expected {} positional arguments, found {} for builtin '{}'\n",
                 .{ start_token.line_nr, bc_info.pos_params, pos_params, keyword });
@@ -1661,24 +1663,34 @@ pub const Parser = struct {
             return ParseError.SyntaxError;
         }
 
-        const result = bic.evaluate_builtin(
-            &self.node_arena.allocator, builtin, mb_builtin_type.?, .{}) catch {
-            return ParseError.BuiltinCallFailed;
-        };
+        // only evaluate top level call
         if (parent == null) {
-            // save the result in the node if we're the top level call
-            const persistent = try self.allocator.create(bic.BuiltinResult);
-            persistent.* = result;
-            builtin.data.BuiltinCall.result = persistent;
-            builtin.delete_children(&self.node_arena.allocator);
-
-            switch (mb_builtin_type.?) {
+            const result = bic.evaluate_builtin(
+                &self.node_arena.allocator, builtin, mb_builtin_type.?, .{}) catch {
+                return ParseError.BuiltinCallFailed;
+            };
+            switch (result) {
                 .cite, .textcite, .cites => {
+                    // save the result in the node if we're the top level call
+                    const persistent = try self.allocator.create(bic.BuiltinResult);
+                    persistent.* = result;
+                    builtin.data.BuiltinCall.result = persistent;
+
                     // store citation nodes for passing them to citeproc and replacing them
                     // with actual citation nodes
                     try self.citations.append(builtin);
                 },
+                .bibliography => {
+                    if (self.bibliography) |bib_node| {
+                        Parser.report_error("Only one bibliography allowed currently!\n", .{});
+                        return ParseError.SyntaxError;
+                    }
+
+                    self.bibliography = result.bibliography;
+                },
+                else => {},
             }
+
         }
     }
 };

@@ -323,3 +323,12 @@ In-text citation: @textcite(doe99) says blah.
 
 With locator: @textcite(smith04, loc=p. 33) says blah.
 %% error due to postional arg after kwarg: @textcite(smith04, loc=p. 33, error)
+
+## Bibliography
+
+@bibliography()
+
+
+## Other
+
+Smallcaps: @sc(Mueller)

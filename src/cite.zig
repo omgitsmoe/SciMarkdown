@@ -48,14 +48,18 @@ pub const Format = enum {
 pub fn nodes_from_citeproc_json(
     allocator: *std.mem.Allocator,
     json: []const u8,
-    cite_nodes: []*Node  // NodeKind.Citation nodes in the same order as citations were passed to citeproc
+    cite_nodes: []*Node  // TODO NodeKind.Citation nodes in the same order as citations were passed to citeproc
 ) ![]*Node {
     // NOTE: either use the Parser and keep the ValueTree and generate formatted
     // strings from that directly or use json.TokenStream to generate
     // CiteprocResult from that 'manually'
     var stream = std.json.Parser.init(allocator, false);
-    const json_tree = try stream.parse(json);
-    //std.debug.print("Result:\n{}\n", .{ citeproc_result.root });
+    defer stream.deinit();  // deallocates node/values stack
+    var json_tree = try stream.parse(json);
+    // json_tree.arena holds allocated Arrays/ObjectMaps/Strings
+    // no Strings allocated since we passed false as copy_strings
+    // otherwise we could not free at the end of this proc
+    defer json_tree.deinit();
 
     var bib_nodes = std.ArrayList(*Node).init(allocator);
 
@@ -165,6 +169,7 @@ fn nodes_from_formatted(
     }
 }
 
+/// HAS to be called with parser's node_arena.allocator (or another ArenaAllocator)
 /// potential @MemoryLeak if no ArenaAllocator or sth similar is used
 /// since the caller takes ownership of stdout and stderr that are
 /// currently not passed TODO
@@ -195,7 +200,7 @@ pub fn run_citeproc(allocator: *std.mem.Allocator, cite_nodes: []*Node) ![]*Node
                 // even though it does say that |*value| makes it a ptr
                 .textcite => |*two_cites| try citations.append(two_cites[0..]),
                 .cites => |cites| try citations.append(cites),
-                //else => unreachable,
+                else => unreachable,
             }
         }
     }
@@ -212,6 +217,7 @@ pub fn run_citeproc(allocator: *std.mem.Allocator, cite_nodes: []*Node) ![]*Node
         "--format=json",
     };
     var runner = try std.ChildProcess.init(cmd, allocator);
+    defer runner.deinit();
     runner.stdin_behavior = .Pipe;
     runner.stdout_behavior = .Pipe;
     runner.stderr_behavior = .Pipe;
@@ -242,6 +248,8 @@ pub fn run_citeproc(allocator: *std.mem.Allocator, cite_nodes: []*Node) ![]*Node
     const stderr = try runner.stderr.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
     errdefer allocator.free(stderr);
     std.debug.print("Done reading from stderr!\nERR:\n{}\n", .{ stderr });
+    // TODO stderr not used currently
+    allocator.free(stderr);
 
     _ = try runner.wait();
 

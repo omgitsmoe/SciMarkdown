@@ -8,6 +8,8 @@ const Language = @import("code_chunks.zig").Language;
 const builtin = @import("builtin.zig");
 const DFS = @import("utils.zig").DepthFirstIterator;
 
+const expect = std.testing.expect;
+
 // meta.TagType gets union's enum tag type (by using @typeInfo(T).tag_type)
 pub const NodeKind = std.meta.TagType(Node.NodeData);
 pub const Node = struct {
@@ -31,6 +33,8 @@ pub const Node = struct {
     ///           - sublist
     ///           ^ this is the indent of the sublist
     pub const ListItemData = struct { list_item_starter: TokenKind, indent: u16 };
+    pub const CitationData = struct { id: []const u8 };
+
     // tagged union
     pub const NodeData = union(enum) {
         // special
@@ -59,9 +63,9 @@ pub const Node = struct {
         Image: struct { alt: []const u8, label: ?[]const u8, url: ?[]const u8, title: ?[]const u8 },
 
         // TODO add id to generate link to bibentry
-        Citation,
+        Citation: CitationData,
         Bibliography,
-        BibEntry: struct { id: []const u8 },
+        BibEntry: CitationData,
 
         Paragraph,
         BlankLine, // ?
@@ -145,13 +149,53 @@ pub const Node = struct {
         while (dfs.next()) |node_info| {
             if (!node_info.is_end)
                 continue;
-            // std.debug.print("Visit end {}\n", .{ node_info.data.data });
+            std.debug.print("Deleting end {}\n", .{ node_info.data.data });
             allocator.destroy(node_info.data);
         }
 
         // !IMPORTANT! mark self as having no children
         self.first_child = null;
         self.last_child = null;
+    }
+
+    /// detaches itself from parent
+    pub fn detach(self: *Node) void {
+        if (self.parent) |parent| {
+            parent.remove_child(self);
+        }
+    }
+
+    /// assumes that x is a child of self
+    /// does not deallocate x
+    pub fn remove_child(self: *Node, x: *Node) void {
+        if (self.first_child == x) {
+            if (self.last_child == x) {
+                // x is the only child
+                self.first_child = null;
+                self.last_child = null;
+            } else {
+                self.first_child = x.next;
+            }
+            x.parent = null;
+            x.next = null;
+            return;
+        }
+
+        // find node which is followed by x
+        var prev_child = self.first_child.?;
+        while (prev_child.next != x) {
+            prev_child = prev_child.next.?;
+        }
+
+        if (self.last_child == x) {
+            self.last_child = prev_child;
+            prev_child.next = null;
+        } else {
+            prev_child.next = x.next;
+        }
+
+        x.next = null;
+        x.parent = null;
     }
 
     pub fn print_direct_children(self: *Node) void {
@@ -162,6 +206,104 @@ pub const Node = struct {
         }
     }
 };
+
+test "node remove_child first_child of 3" {
+    const alloc = std.testing.allocator;
+
+    var parent = try Node.create(alloc);
+    defer alloc.destroy(parent);
+    var child1 = try Node.create(alloc);
+    defer alloc.destroy(child1);
+    var child2 = try Node.create(alloc);
+    defer alloc.destroy(child2);
+    var child3 = try Node.create(alloc);
+    defer alloc.destroy(child3);
+
+    parent.append_child(child1);
+    parent.append_child(child2);
+    parent.append_child(child3);
+
+    parent.remove_child(child1);
+    expect(parent.first_child == child2);
+    expect(parent.last_child  == child3);
+
+    expect(child2.next == child3);
+    expect(child1.next == null);
+    expect(child1.parent == null);
+    expect(child3.next == null);
+}
+
+test "node remove_child middle_child of 3" {
+    const alloc = std.testing.allocator;
+
+    var parent = try Node.create(alloc);
+    defer alloc.destroy(parent);
+    var child1 = try Node.create(alloc);
+    defer alloc.destroy(child1);
+    var child2 = try Node.create(alloc);
+    defer alloc.destroy(child2);
+    var child3 = try Node.create(alloc);
+    defer alloc.destroy(child3);
+
+    parent.append_child(child1);
+    parent.append_child(child2);
+    parent.append_child(child3);
+
+    parent.remove_child(child2);
+    expect(parent.first_child == child1);
+    expect(parent.last_child  == child3);
+
+    expect(child2.next == null);
+    expect(child2.parent == null);
+
+    expect(child1.next == child3);
+    expect(child3.next == null);
+}
+
+test "node remove_child last_child of 3" {
+    const alloc = std.testing.allocator;
+
+    var parent = try Node.create(alloc);
+    defer alloc.destroy(parent);
+    var child1 = try Node.create(alloc);
+    defer alloc.destroy(child1);
+    var child2 = try Node.create(alloc);
+    defer alloc.destroy(child2);
+    var child3 = try Node.create(alloc);
+    defer alloc.destroy(child3);
+
+    parent.append_child(child1);
+    parent.append_child(child2);
+    parent.append_child(child3);
+
+    parent.remove_child(child3);
+    expect(parent.first_child == child1);
+    expect(parent.last_child  == child2);
+
+    expect(child1.next == child2);
+    expect(child2.next == null);
+
+    expect(child3.next == null);
+    expect(child3.parent == null);
+}
+
+test "node remove_child only_child" {
+    const alloc = std.testing.allocator;
+
+    var parent = try Node.create(alloc);
+    defer alloc.destroy(parent);
+    var child1 = try Node.create(alloc);
+    defer alloc.destroy(child1);
+
+    parent.append_child(child1);
+
+    parent.remove_child(child1);
+    expect(parent.first_child == null);
+    expect(parent.last_child  == null);
+
+    expect(child1.next == null);
+    expect(child1.parent == null);
+}
 
 pub inline fn is_container_block(self: NodeKind) bool {
     return switch (self) {

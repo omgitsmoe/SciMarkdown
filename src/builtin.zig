@@ -7,18 +7,22 @@ pub const BuiltinCall = enum {
     cite = 0,
     textcite,
     cites,
+    bibliography,
+    sc,
 };
 
 pub const BuiltinCallInfo = struct {
     // 0 -> varargs
-    pos_params: u32,
-    kw_params:  u32,
+    pos_params: i16,
+    kw_params:  u16,
 };
 
 pub const builtin_call_info = [_]BuiltinCallInfo {
-    .{ .pos_params = 1, .kw_params = 4 },  // cite
-    .{ .pos_params = 1, .kw_params = 4 },  // textcite
-    .{ .pos_params = 0, .kw_params = 0 },  // cites
+    .{ .pos_params =  1, .kw_params = 4 },  // cite
+    .{ .pos_params =  1, .kw_params = 4 },  // textcite
+    .{ .pos_params = -1, .kw_params = 0 },  // cites
+    .{ .pos_params =  0, .kw_params = 0 },  // bibliography
+    .{ .pos_params =  1, .kw_params = 0 },  // sc
 };
 
 pub const BuiltinResult = union(BuiltinCall) {
@@ -30,6 +34,8 @@ pub const BuiltinResult = union(BuiltinCall) {
     // being suppress-author
     textcite: [2]csl.CitationItem,
     cites: []const csl.CitationItem,
+    bibliography: *ast.Node,
+    sc,
 };
 
 pub const Error = error {
@@ -42,6 +48,9 @@ pub const Error = error {
 // anytype means we can pass anonymous structs like: .{ .parser = self, .. }
 // checkted at compile time (aka "comptime duck-typing")
 /// expects that the correct amount of positional arguments are already validated by parse_builtin
+/// HAS to be called with parser's node_arena.allocator
+/// evaluate_builtin and derivatives are expected to clean up the argument nodes
+/// so that only the builtin_node itself OR the result nodes remain!
 pub fn evaluate_builtin(
     allocator: *std.mem.Allocator,
     builtin_node: *ast.Node,
@@ -54,20 +63,15 @@ pub fn evaluate_builtin(
             result = .{
                 .cite = try evaluate_builtin_cite(builtin_node, .cite, data),
             };
+            // clean up arguments
+            builtin_node.delete_children(allocator);
         },
         .textcite => {
             result = .{
                 .textcite = try evaluate_builtin_textcite(builtin_node, .textcite, .{}),
             };
-            // var cite_author_only = try evaluate_builtin_cite(builtin_node, .textcite, data);
-            // var cite_no_author: csl.CitationItem = cite_author_only;
-
-            // cite_author_only.@"author-only" = .{ .boolean = true };
-            // cite_no_author.@"suppress-author" = .{ .boolean = true };
-
-            // result = .{
-            //     .textcite = [2]csl.CitationItem { cite_author_only, cite_no_author },
-            // };
+            // clean up arguments
+            builtin_node.delete_children(allocator);
         },
         .cites => {
             // TODO @MemoryLeak this is not free'd
@@ -77,6 +81,8 @@ pub fn evaluate_builtin(
                 switch (next.first_child.?.data) {
                     .BuiltinCall => |call| {
                         switch (call.builtin_type) {
+                            // .cite and .textcite nodes will have been evaluated already
+                            // just use the resul ptr
                             .cite => {
                                 try citations.append(
                                     try evaluate_builtin_cite(next.first_child.?, .cite, .{}));
@@ -118,9 +124,36 @@ pub fn evaluate_builtin(
             }
             std.debug.print("Multicite END\n", .{});
 
+            // clean up arguments
+            builtin_node.delete_children(allocator);
             result = .{
                 .cites = citations.toOwnedSlice(),
             };
+        },
+        .bibliography => {
+            var bib_node = try ast.Node.create(allocator);
+            bib_node.data = .Bibliography;
+            builtin_node.append_child(bib_node);
+
+            result = .{
+                .bibliography = bib_node,
+            };
+        },
+        .sc => {
+            var only_arg = builtin_node.first_child.?;
+            var text_node = only_arg.first_child.?;
+            text_node.detach();  // remove from only_arg
+            // TODO validate arg types in a pre-pass?
+
+            // insert parent .SmallCaps node above text_node
+            var parent = try ast.Node.create(allocator);
+            parent.data = .SmallCaps;
+            parent.append_child(text_node);
+
+            builtin_node.append_child(parent);
+            // there are no argument nodes to clean up
+
+            result = .sc;
         },
     }
 

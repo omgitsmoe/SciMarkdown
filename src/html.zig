@@ -141,6 +141,13 @@ pub const HTMLGenerator = struct {
                         }
                     }
                 },
+                .BibEntry => {
+                    if (!node_info.is_end) {
+                        try self.html_buf.appendSlice("<p>\n");
+                    } else {
+                        try self.html_buf.appendSlice("</p>\n");
+                    }
+                },
                 .Emphasis => {
                     if (!node_info.is_end) {
                         try self.html_buf.appendSlice("<em>");

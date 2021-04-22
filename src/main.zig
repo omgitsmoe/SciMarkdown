@@ -41,7 +41,12 @@ pub fn mainArgs(allocator: *std.mem.Allocator, args: []const []const u8) !void {
     defer code_runner.deinit();
     try code_runner.run();
 
-    _ = try run_citeproc(&parser.node_arena.allocator, parser.citations.items);
+    const bib_entries = try run_citeproc(&parser.node_arena.allocator, parser.citations.items);
+    if (parser.bibliography) |bib| {
+        for (bib_entries) |entry| {
+            bib.append_child(entry);
+        }
+    }
 
     var html_gen = HTMLGenerator.init(allocator, parser.current_document, parser.label_ref_map);
     const html_out = try html_gen.generate();
