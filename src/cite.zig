@@ -180,7 +180,14 @@ pub fn run_citeproc(allocator: *std.mem.Allocator, cite_nodes: []*Node) ![]*Node
         if (cite.data.BuiltinCall.result) |result| {
             switch (result.*) {
                 .cite => |single_cite| try citations.append(&[1]CitationItem { single_cite }),
-                .textcite => |two_cites| try citations.append(two_cites[0..]),
+                // NOTE: this just overwrites the previous one that was appended
+                // since |two_cites| will be the values copied on the stack (which is [2]CitationItem)
+                // .textcite => |two_cites| try citations.append(two_cites[0..]),
+                // whereas |*two_cites| will be [2]*CitationItem
+                // @Compiler TODO the documentation mention that |value| will actually
+                // copy value onto the stack (and not use *const value as I assumed)
+                // even though it does say that |*value| makes it a ptr
+                .textcite => |*two_cites| try citations.append(two_cites[0..]),
                 .cites => |cites| try citations.append(cites),
                 //else => unreachable,
             }

@@ -319,7 +319,7 @@ Blah blah @cite(doe99, loc=pp. 33-35\, 38-39 and *passim*).
 
 Omit author name: Smith says blah @cite(-smith04).
 
-In-text citation: @textcite(smith04) says blah.
+In-text citation: @textcite(doe99) says blah.
 
 With locator: @textcite(smith04, loc=p. 33) says blah.
 %% error due to postional arg after kwarg: @textcite(smith04, loc=p. 33, error)
