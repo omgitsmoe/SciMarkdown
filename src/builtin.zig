@@ -47,27 +47,30 @@ pub fn evaluate_builtin(
     builtin_node: *ast.Node,
     builtin_type: BuiltinCall,
     data: anytype
-) !BuiltinResult {
+) Error!BuiltinResult {
     var result: BuiltinResult = undefined;
     switch (builtin_type) {
         .cite => {
             result = .{
-                .cite = try evaluate_builtin_cite(builtin_node, builtin_type, data),
+                .cite = try evaluate_builtin_cite(builtin_node, .cite, data),
             };
         },
         .textcite => {
-            var cite_author_only = try evaluate_builtin_cite(builtin_node, builtin_type, data);
-            var cite_no_author: csl.CitationItem = cite_author_only;
-
-            cite_author_only.@"author-only" = .{ .boolean = true };
-            cite_no_author.@"suppress-author" = .{ .boolean = true };
-
             result = .{
-                .textcite = [2]csl.CitationItem { cite_author_only, cite_no_author },
+                .textcite = try evaluate_builtin_textcite(builtin_node, .textcite, .{}),
             };
+            // var cite_author_only = try evaluate_builtin_cite(builtin_node, .textcite, data);
+            // var cite_no_author: csl.CitationItem = cite_author_only;
+
+            // cite_author_only.@"author-only" = .{ .boolean = true };
+            // cite_no_author.@"suppress-author" = .{ .boolean = true };
+
+            // result = .{
+            //     .textcite = [2]csl.CitationItem { cite_author_only, cite_no_author },
+            // };
         },
         .cites => {
-            // TODO @Leak this is not free'd
+            // TODO @MemoryLeak this is not free'd
             var citations = std.ArrayList(csl.CitationItem).init(allocator);
             var mb_next = builtin_node.first_child;
             while (mb_next) |next| : (mb_next = next.next) {
@@ -79,10 +82,16 @@ pub fn evaluate_builtin(
                                     try evaluate_builtin_cite(next.first_child.?, .cite, .{}));
                             },
                             .textcite => {
+                                // TODO compiler stuck in an infinite loop
+                                // [999/10000+] with inferred error set
+                                // [4000/6000]  with explicit error set but still infinite loop
                                 // const tc = try evaluate_builtin(
-                                //     allocator, next.first_child.?, call.builtin_type, .{});
+                                //     allocator, next.first_child.?, .textcite, .{});
                                 // try citations.append(tc.textcite[0]);
                                 // try citations.append(tc.textcite[1]);
+                                const tc = try evaluate_builtin_textcite(next.first_child.?, .textcite, .{});
+                                try citations.append(tc[0]);
+                                try citations.append(tc[1]);
                             },
                             else => {
                                 std.log.err(
@@ -118,7 +127,27 @@ pub fn evaluate_builtin(
     return result;
 }
 
-pub fn evaluate_builtin_cite(builtin_node: *ast.Node, builtin_type: BuiltinCall, data: anytype) !csl.CitationItem {
+/// just here since recursive calls won't compile with the compiler being stuck in an
+/// infinite loop during semantic analysis see: https://github.com/ziglang/zig/issues/4572
+pub fn evaluate_builtin_textcite(
+    builtin_node: *ast.Node,
+    builtin_type: BuiltinCall,
+    data: anytype
+) Error![2]csl.CitationItem {
+    var cite_author_only = try evaluate_builtin_cite(builtin_node, .textcite, data);
+    var cite_no_author: csl.CitationItem = cite_author_only;
+
+    cite_author_only.@"author-only" = .{ .boolean = true };
+    cite_no_author.@"suppress-author" = .{ .boolean = true };
+
+    return [2]csl.CitationItem { cite_author_only, cite_no_author };
+}
+
+pub fn evaluate_builtin_cite(
+    builtin_node: *ast.Node,
+    builtin_type: BuiltinCall,
+    data: anytype
+) Error!csl.CitationItem {
     // return BuiltinResult here as well?
     // var result: BuiltinResult = undefined;
 
@@ -139,8 +168,14 @@ pub fn evaluate_builtin_cite(builtin_node: *ast.Node, builtin_type: BuiltinCall,
                 .{ @tagName(builtin_type) });
             return Error.ArgumentMismatch;
         }
-        citation.id.string = fchild.first_child.?.data.Text.text;
-        std.debug.print("First pos arg: {}\n", .{ citation.id });
+        var id = fchild.first_child.?.data.Text.text;
+        if (id[0] == '-') {
+            // id starting with '-' -> suppress author
+            citation.@"suppress-author" = .{ .boolean = true };
+            id = id[1..];
+        }
+        citation.id.string = id;
+        std.debug.print("First pos arg: {}\n", .{ fchild.first_child.?.data.Text.text });
 
         var mb_next = fchild.next;
         while (mb_next) |next| : (mb_next = next.next) {

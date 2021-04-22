@@ -6,6 +6,7 @@ const TokenKind = tokenizer.TokenKind;
 const Language = @import("code_chunks.zig").Language;
 
 const builtin = @import("builtin.zig");
+const DFS = @import("utils.zig").DepthFirstIterator;
 
 // meta.TagType gets union's enum tag type (by using @typeInfo(T).tag_type)
 pub const NodeKind = std.meta.TagType(Node.NodeData);
@@ -37,7 +38,7 @@ pub const Node = struct {
         Document,
         Import,
 
-        BuiltinCall: struct { builtin_type: builtin.BuiltinCall },
+        BuiltinCall: struct { builtin_type: builtin.BuiltinCall, result: ?*builtin.BuiltinResult = null },
         PostionalArg,
         KeywordArg: struct { keyword: []const u8 },
 
@@ -132,6 +133,21 @@ pub const Node = struct {
             std.debug.assert(next.first_child == null);
             allocator.destroy(next);
         }
+        self.first_child = null;
+        self.last_child = null;
+    }
+
+    pub fn delete_children(self: *Node, allocator: *std.mem.Allocator) void {
+        var dfs = DFS(Node, true).init(self);
+
+        while (dfs.next()) |node_info| {
+            if (!node_info.is_end)
+                continue;
+            // std.debug.print("Visit end {}\n", .{ node_info.data.data });
+            allocator.destroy(node_info.data);
+        }
+
+        // !IMPORTANT! otherwise iteration will be broken
         self.first_child = null;
         self.last_child = null;
     }

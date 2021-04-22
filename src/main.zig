@@ -3,6 +3,7 @@ const std = @import("std");
 const Parser = @import("parser.zig").Parser;
 const HTMLGenerator = @import("html.zig").HTMLGenerator;
 const CodeRunner = @import("code_chunks.zig").CodeRunner;
+const run_citeproc = @import("cite.zig").run_citeproc;
 
 pub fn main() !void {
     // gpa optimized for safety over performance; can detect leaks, double-free and use-after-free
@@ -39,6 +40,8 @@ pub fn mainArgs(allocator: *std.mem.Allocator, args: []const []const u8) !void {
     var code_runner = try CodeRunner.init(allocator, .Python, parser.current_document);
     defer code_runner.deinit();
     try code_runner.run();
+
+    _ = try run_citeproc(allocator, parser.citations.items);
 
     var html_gen = HTMLGenerator.init(allocator, parser.current_document, parser.label_ref_map);
     const html_out = try html_gen.generate();

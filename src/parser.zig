@@ -22,7 +22,9 @@ pub const Parser = struct {
     allocator: *std.mem.Allocator,
     node_arena: std.heap.ArenaAllocator,
     string_arena: std.heap.ArenaAllocator,
+
     label_ref_map: std.StringHashMap(*Node.LinkData),
+    citations:     std.ArrayList(*Node),
 
     tokenizer: Tokenizer,
     // NOTE: ArrayList: pointers to items are __invalid__ after resizing operations!!
@@ -68,7 +70,9 @@ pub const Parser = struct {
             .allocator = allocator,
             .node_arena = std.heap.ArenaAllocator.init(allocator),
             .string_arena = std.heap.ArenaAllocator.init(allocator),
+
             .label_ref_map = std.StringHashMap(*Node.LinkData).init(allocator),
+            .citations     = std.ArrayList(*Node).init(allocator),
 
             .tokenizer = try Tokenizer.init(allocator, filename),
             // TODO allocate a capacity for tokens with ensureCapacity based on filesize
@@ -100,6 +104,7 @@ pub const Parser = struct {
         self.tokenizer.deinit();
         self.token_buf.deinit();
         self.label_ref_map.deinit();
+        self.citations.deinit();
     }
 
     inline fn new_node(self: *Parser, parent: *Node) !*Node {
@@ -1656,8 +1661,24 @@ pub const Parser = struct {
             return ParseError.SyntaxError;
         }
 
-        _ = bic.evaluate_builtin(self.allocator, builtin, mb_builtin_type.?, .{}) catch {
+        const result = bic.evaluate_builtin(
+            self.allocator, builtin, mb_builtin_type.?, .{}) catch {
             return ParseError.BuiltinCallFailed;
         };
+        if (parent == null) {
+            // save the result in the node if we're the top level call
+            const persistent = try self.allocator.create(bic.BuiltinResult);
+            persistent.* = result;
+            builtin.data.BuiltinCall.result = persistent;
+            builtin.delete_children(&self.node_arena.allocator);
+
+            switch (mb_builtin_type.?) {
+                .cite, .textcite, .cites => {
+                    // store citation nodes for passing them to citeproc and replacing them
+                    // with actual citation nodes
+                    try self.citations.append(builtin);
+                },
+            }
+        }
     }
 };

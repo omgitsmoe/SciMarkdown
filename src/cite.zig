@@ -6,6 +6,9 @@ const Node = ast.Node;
 const TokenKind = @import("tokenizer.zig").TokenKind;
 const CitationItem = @import("csl_json.zig").CitationItem;
 
+const builtin = @import("builtin.zig");
+const BuiltinCall = builtin.BuiltinCall;
+
 // pub const CiteprocResult = struct {
 //     citations: [][]FormattedOrLiteral,
 //     // array of [id, []FormattedOrLiteral]
@@ -159,18 +162,7 @@ fn nodes_from_formatted(
     }
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer {
-        const leaked = gpa.deinit();
-    }
-
-    const alloc = &gpa.allocator;
-
-    var cites = [_]CitationItem{
-                    .{ .id = .{ .string = "ITEM-1" } },
-                    .{ .id = .{ .string = "ITEM-3" } },
-    };
+pub fn run_citeproc(allocator: *std.mem.Allocator, cite_nodes: []*Node) ![]*Node {
     // jgm/citeproc states that it takes either an array of Citation{} objects (json)
     // or an array of CitationItem arrays
     // but if the first option is passed it errors:
@@ -182,9 +174,22 @@ pub fn main() !void {
     //         .citationItems = cites[0..],
     //     },
     // },
+    var citations = std.ArrayList([]const CitationItem).init(allocator);
+    defer citations.deinit();
+    for (cite_nodes) |cite| {
+        if (cite.data.BuiltinCall.result) |result| {
+            switch (result.*) {
+                .cite => |single_cite| try citations.append(&[1]CitationItem { single_cite }),
+                .textcite => |two_cites| try citations.append(two_cites[0..]),
+                .cites => |cites| try citations.append(cites),
+                //else => unreachable,
+            }
+        }
+    }
     var to_citeproc = .{
         // citations = [[CitationItem, ..], [CitationItem, ..], ..]
-        .citations = &[_][]CitationItem { cites[0..] },
+        .citations = citations.items,
+        // TODO pass lang
         .lang = "de-DE",
     };
 
@@ -193,7 +198,7 @@ pub fn main() !void {
         "--style=vendor\\apa-6th-edition.csl",
         "--format=json",
     };
-    var runner = try std.ChildProcess.init(cmd, alloc);
+    var runner = try std.ChildProcess.init(cmd, allocator);
     runner.stdin_behavior = .Pipe;
     runner.stdout_behavior = .Pipe;
     runner.stderr_behavior = .Pipe;
@@ -201,7 +206,7 @@ pub fn main() !void {
     // order important otherwise stdin etc. not initialized
     try runner.spawn();
 
-    var string = std.ArrayList(u8).init(alloc);
+    var string = std.ArrayList(u8).init(allocator);
     defer string.deinit();
     try std.json.stringify(to_citeproc, .{}, string.writer());
     std.debug.print("IN:\n{}\n", .{ string.items });
@@ -218,28 +223,29 @@ pub fn main() !void {
     // might deadlock due to https://github.com/ziglang/zig/issues/6343
     // weirdly only WindowsTerminal seems to have a problem with it and stops
     // responding, cmd.exe works fine as does running it in a debugger
-    const stdout = try runner.stdout.?.reader().readAllAlloc(alloc, 10 * 1024 * 1024);
-    errdefer alloc.free(stdout);
+    const stdout = try runner.stdout.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
+    errdefer allocator.free(stdout);
     std.debug.print("Done reading from stdout!\nOUT:\n{}\n", .{ stdout });
-    const stderr = try runner.stderr.?.reader().readAllAlloc(alloc, 10 * 1024 * 1024);
-    errdefer alloc.free(stderr);
+    const stderr = try runner.stderr.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
+    errdefer allocator.free(stderr);
     std.debug.print("Done reading from stderr!\nERR:\n{}\n", .{ stderr });
 
     _ = try runner.wait();
 
-    var res = try nodes_from_citeproc_json(alloc, stdout);
-    const html = @import("html.zig");
+    var res = try nodes_from_citeproc_json(allocator, stdout, cite_nodes);
+    return res;
+    // const html = @import("html.zig");
 
-    for (res) |it| {
-        for (it) |node| {
-            var htmlout = html.HTMLGenerator.init(
-                alloc, node, std.StringHashMap(*Node.LinkData).init(alloc));
-            var out =  try htmlout.generate();
-            std.debug.print("{}\n", .{ out });
-            defer alloc.free(out);
-        }
-    }
+    // for (res) |it| {
+    //     for (it) |node| {
+    //         var htmlout = html.HTMLGenerator.init(
+    //             allocator, node, std.StringHashMap(*Node.LinkData).init(allocator));
+    //         var out =  try htmlout.generate();
+    //         std.debug.print("{}\n", .{ out });
+    //         defer allocator.free(out);
+    //     }
+    // }
 
-    alloc.free(stdout);
-    alloc.free(stderr);
+    // allocator.free(stdout);
+    // allocator.free(stderr);
 }

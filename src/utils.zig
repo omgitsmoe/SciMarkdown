@@ -44,6 +44,7 @@ pub fn DepthFirstIterator(
         }
 
         // adapted from: https://github.com/kivikakk/koino/blob/main/src/ast.zig by kivikakk
+        /// NOTE: only a .is_end = false is emitted for the starting node (no is_end=true)!
         pub fn next(self: *Self) ?NodeInfo {
             const item = self.next_item orelse return null;
 
@@ -64,6 +65,7 @@ pub fn DepthFirstIterator(
             } else {
                 if (item.data == self.start) {
                     // finish when reaching starting node
+                    // TODO also emit is_end for start node here?
                     return null;
                 } else if (item.data.next) |sibling| {
                     // current node has been completely traversed -> q sibling
