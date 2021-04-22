@@ -1662,7 +1662,7 @@ pub const Parser = struct {
         }
 
         const result = bic.evaluate_builtin(
-            self.allocator, builtin, mb_builtin_type.?, .{}) catch {
+            &self.node_arena.allocator, builtin, mb_builtin_type.?, .{}) catch {
             return ParseError.BuiltinCallFailed;
         };
         if (parent == null) {

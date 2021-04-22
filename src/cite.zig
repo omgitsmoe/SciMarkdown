@@ -90,6 +90,9 @@ fn nodes_from_formatted(
     first_parent: *Node
 ) !void {
 
+    // TODO instead of chaning the BuiltinCall node to Citation
+    // use Citation node for a single "CitatioItem" in the sense of csl/citeproc
+    // and store the id so we can later generate a link to the corresponding bibentry
     for (formatted_items) |formatted| {
         switch (formatted) {
             .String => |str| {
@@ -162,6 +165,9 @@ fn nodes_from_formatted(
     }
 }
 
+/// potential @MemoryLeak if no ArenaAllocator or sth similar is used
+/// since the caller takes ownership of stdout and stderr that are
+/// currently not passed TODO
 pub fn run_citeproc(allocator: *std.mem.Allocator, cite_nodes: []*Node) ![]*Node {
     // jgm/citeproc states that it takes either an array of Citation{} objects (json)
     // or an array of CitationItem arrays
@@ -241,18 +247,4 @@ pub fn run_citeproc(allocator: *std.mem.Allocator, cite_nodes: []*Node) ![]*Node
 
     var res = try nodes_from_citeproc_json(allocator, stdout, cite_nodes);
     return res;
-    // const html = @import("html.zig");
-
-    // for (res) |it| {
-    //     for (it) |node| {
-    //         var htmlout = html.HTMLGenerator.init(
-    //             allocator, node, std.StringHashMap(*Node.LinkData).init(allocator));
-    //         var out =  try htmlout.generate();
-    //         std.debug.print("{}\n", .{ out });
-    //         defer allocator.free(out);
-    //     }
-    // }
-
-    // allocator.free(stdout);
-    // allocator.free(stderr);
 }

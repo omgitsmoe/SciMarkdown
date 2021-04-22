@@ -41,7 +41,7 @@ pub fn mainArgs(allocator: *std.mem.Allocator, args: []const []const u8) !void {
     defer code_runner.deinit();
     try code_runner.run();
 
-    _ = try run_citeproc(allocator, parser.citations.items);
+    _ = try run_citeproc(&parser.node_arena.allocator, parser.citations.items);
 
     var html_gen = HTMLGenerator.init(allocator, parser.current_document, parser.label_ref_map);
     const html_out = try html_gen.generate();

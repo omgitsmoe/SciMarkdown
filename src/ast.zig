@@ -58,6 +58,7 @@ pub const Node = struct {
         // oterwise the union is getting way too big
         Image: struct { alt: []const u8, label: ?[]const u8, url: ?[]const u8, title: ?[]const u8 },
 
+        // TODO add id to generate link to bibentry
         Citation,
         Bibliography,
         BibEntry: struct { id: []const u8 },
@@ -125,7 +126,7 @@ pub const Node = struct {
 
     /// allocator has to be the allocator that node and it's direct children were
     /// allocated with
-    /// Node's child must not have children of their own, otherwise they will be a leak
+    /// Node's child must not have children of their own, otherwise there will be a leak
     pub fn delete_direct_children(self: *Node, allocator: *std.mem.Allocator) void {
         var mb_next = self.first_child;
         while (mb_next) |next| {
@@ -137,6 +138,7 @@ pub const Node = struct {
         self.last_child = null;
     }
 
+    /// allocator has to be the one that node and it's direct children were allocated with
     pub fn delete_children(self: *Node, allocator: *std.mem.Allocator) void {
         var dfs = DFS(Node, true).init(self);
 
@@ -147,7 +149,7 @@ pub const Node = struct {
             allocator.destroy(node_info.data);
         }
 
-        // !IMPORTANT! otherwise iteration will be broken
+        // !IMPORTANT! mark self as having no children
         self.first_child = null;
         self.last_child = null;
     }
