@@ -459,6 +459,8 @@ pub const Parser = struct {
             TokenKind.Digits => {
                 // maybe ordered list
                 // 1-9 digits (0-9) ending in a '.' or ')'
+                const startnum = self.peek_token().text(self.tokenizer.bytes);
+
                 self.eat_token();
                 const next_token = self.peek_token();
                 const next_token_kind = self.peek_token().token_kind;
@@ -468,7 +470,7 @@ pub const Parser = struct {
 
                     try self.require_token(TokenKind.Space, " after list item starter!");
                     self.eat_token();
-                    try self.parse_ordered_list(next_token, prev_line_blank);
+                    try self.parse_ordered_list(next_token, prev_line_blank, startnum);
                 } else {
                     try self.parse_paragraph();
                 }
@@ -789,7 +791,12 @@ pub const Parser = struct {
         unreachable;
     }
 
-    fn parse_ordered_list(self: *Parser, start_token: *const Token, prev_line_blank: bool) ParseError!void {
+    fn parse_ordered_list(
+        self: *Parser,
+        start_token: *const Token,
+        prev_line_blank: bool,
+        startnum: []const u8
+    ) ParseError!void {
         try self.handle_open_blocks(NodeKind.OrderedListItem, start_token.column, prev_line_blank);
 
         // TODO use start number
@@ -799,7 +806,7 @@ pub const Parser = struct {
         if (!self.can_list_continue(NodeKind.OrderedListItem, start_token, prev_line_blank)) {
             list_node = try self.new_node(self.get_last_block());
             list_node.data = .{
-                .OrderedList = .{ .blank_lines = 0 },
+                .OrderedList = .{ .blank_lines = 0, .start = startnum, },
             };
             self.open_block(list_node);
         } else {
@@ -827,7 +834,7 @@ pub const Parser = struct {
         if (!self.can_list_continue(NodeKind.UnorderedListItem, start_token, prev_line_blank)) {
             list_node = try self.new_node(self.get_last_container_block());
             list_node.data = .{
-                .UnorderedList = .{ .blank_lines = 0 },
+                .UnorderedList = .{ .blank_lines = 0, .start = "" },
             };
             self.open_block(list_node);
         } else {

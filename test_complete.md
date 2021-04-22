@@ -81,7 +81,7 @@ This is a normal paragraph %% and this is a comment
    %% :[ref]: (test)
 1. Actual numbers don't matter, just that it's a number
    continue
-   1. Ordered sub-list
+   12. But the first number of an ordered list determines the start number!
 4. And another item.
 
    %% blank line above will make this a loose list -> every list item starts a paragraph

@@ -83,7 +83,13 @@ pub const HTMLGenerator = struct {
                 .OrderedList => |list| {
                     if (!node_info.is_end) {
                         in_compact_list = if (list.blank_lines > 0) false else true;
-                        try self.html_buf.appendSlice("<ol>\n");
+                        if (list.start) |startnum| {
+                            try self.html_buf.appendSlice("<ol start=\"");
+                            try self.html_buf.appendSlice(startnum);
+                            try self.html_buf.appendSlice("\">\n");
+                        } else {
+                            try self.html_buf.appendSlice("<ol>\n");
+                        }
                     } else {
                         try self.html_buf.appendSlice("</ol>\n");
                         in_compact_list = HTMLGenerator.get_parents_list_compact_status(node_info.data);

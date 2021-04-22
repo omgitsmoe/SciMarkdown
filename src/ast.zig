@@ -25,7 +25,7 @@ pub const Node = struct {
 
     pub const LinkData = struct { label: ?[]const u8, url: ?[]const u8, title: ?[]const u8};
     pub const EmphData = struct { opener_token_kind: TokenKind };
-    pub const ListData = struct { blank_lines: u32 };
+    pub const ListData = struct { blank_lines: u32, start: ?[]const u8 };
     pub const CodeData = struct { language: Language, code: []const u8,
                                   stdout: ?[]const u8 = null, stderr: ?[]const u8 = null };
     /// indent: column that list item startes need to have in order to continue the list
