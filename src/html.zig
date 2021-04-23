@@ -83,12 +83,17 @@ pub const HTMLGenerator = struct {
                 .OrderedList => |list| {
                     if (!node_info.is_end) {
                         in_compact_list = if (list.blank_lines > 0) false else true;
-                        if (list.start) |startnum| {
-                            try self.html_buf.appendSlice("<ol start=\"");
-                            try self.html_buf.appendSlice(startnum);
-                            try self.html_buf.appendSlice("\">\n");
-                        } else {
+                        if (list.start_num == 1 and list.ol_type == '1') {
                             try self.html_buf.appendSlice("<ol>\n");
+                        } else {
+                            var numbuf: [4]u8 = undefined;
+                            var numslice = std.fmt.bufPrint(&numbuf, "{}", .{ list.start_num })
+                                catch return Error.FormatBufferTooSmall;
+                            try self.html_buf.appendSlice("<ol start=\"");
+                            try self.html_buf.appendSlice(numslice);
+                            try self.html_buf.appendSlice("\" type=\"");
+                            try self.html_buf.append(list.ol_type);
+                            try self.html_buf.appendSlice("\">\n");
                         }
                     } else {
                         try self.html_buf.appendSlice("</ol>\n");

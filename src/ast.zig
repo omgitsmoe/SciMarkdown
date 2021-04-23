@@ -25,14 +25,14 @@ pub const Node = struct {
 
     pub const LinkData = struct { label: ?[]const u8, url: ?[]const u8, title: ?[]const u8};
     pub const EmphData = struct { opener_token_kind: TokenKind };
-    pub const ListData = struct { blank_lines: u32, start: ?[]const u8 };
+    pub const ListData = struct { blank_lines: u32, start_num: u16 = 1, ol_type: u8 };
     pub const CodeData = struct { language: Language, code: []const u8,
                                   stdout: ?[]const u8 = null, stderr: ?[]const u8 = null };
     /// indent: column that list item startes need to have in order to continue the list
     ///         1. test
     ///           - sublist
     ///           ^ this is the indent of the sublist
-    pub const ListItemData = struct { list_item_starter: TokenKind, indent: u16 };
+    pub const ListItemData = struct { list_item_starter: TokenKind, indent: u16, ol_type: u8 };
     pub const CitationData = struct { id: []const u8 };
 
     // tagged union

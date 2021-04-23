@@ -202,7 +202,7 @@ pub const Tokenizer = struct {
         // TODO just pass buffer and filename, loading of the file should be done elsewhere
         const contents = try file.reader().readAllAlloc(
             allocator,
-            2 * 1024 * 1024,  // max_size 2MiB, returns error.StreamTooLong if file is larger
+            20 * 1024 * 1024,  // max_size 2MiB, returns error.StreamTooLong if file is larger
         );
 
         // need to initialize explicitly or leave it undefined
@@ -562,7 +562,7 @@ pub const Tokenizer = struct {
                     // consume everything that's not an inline style
                     while (self.peek_next_byte()) |next_byte| : (self.prechecked_advance_to_next_byte()) {
                         switch (next_byte) {
-                            ' ', '\t', '\r', '\n', '_', '*', '/', '\\', '`',
+                            ' ', '\t', '\r', '\n', '_', '*', '/', '\\', '`', '.',
                             '<', '[', ']', ')', '"', '~', '^', '$', '=' , ',', '@' => break,
                             else => {},
                         }

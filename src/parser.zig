@@ -403,7 +403,7 @@ pub const Parser = struct {
                     try self.require_token(TokenKind.Space, " after list item starter!");
                     self.eat_token();
 
-                    try self.parse_unordered_list(start_token, prev_line_blank);
+                    try self.parse_unordered_list(start_token_kind, start_token.column, prev_line_blank);
                 } else if (start_token_kind == TokenKind.Dash and
                            next_token.token_kind == TokenKind.Dash and
                            self.peek_next_token().token_kind == TokenKind.Dash) {
@@ -459,10 +459,18 @@ pub const Parser = struct {
             TokenKind.Digits => {
                 // maybe ordered list
                 // 1-9 digits (0-9) ending in a '.' or ')'
-                const startnum = self.peek_token().text(self.tokenizer.bytes);
+                const start_num = std.fmt.parseUnsigned(
+                    u16, self.peek_token().text(self.tokenizer.bytes), 10)
+                    catch {
+                        Parser.report_error(
+                            "ln:{}: Numbers that start an ordered list need to be in base 10, " ++
+                            "number was '{}'\n",
+                            .{ self.peek_token().line_nr, self.peek_token().text(self.tokenizer.bytes) });
+                        return ParseError.SyntaxError;
+                    };
+                const start_column = self.peek_token().column;
 
                 self.eat_token();
-                const next_token = self.peek_token();
                 const next_token_kind = self.peek_token().token_kind;
                 if (next_token_kind == TokenKind.Period or
                         next_token_kind == TokenKind.Close_paren) {
@@ -470,7 +478,8 @@ pub const Parser = struct {
 
                     try self.require_token(TokenKind.Space, " after list item starter!");
                     self.eat_token();
-                    try self.parse_ordered_list(next_token, prev_line_blank, startnum);
+                    try self.parse_ordered_list(
+                        next_token_kind, start_column, prev_line_blank, start_num, '1');
                 } else {
                     try self.parse_paragraph();
                 }
@@ -654,18 +663,44 @@ pub const Parser = struct {
                 }
             },
 
-            else => {
-                // std.debug.print("Else branch ln {}\n", .{ self.peek_token().line_nr });
-                // self.eat_token();
+            .Text => {
+                switch (self.peek_next_token().token_kind) {
+                    .Period, .Close_paren => {
+                        const start_token = self.peek_token();
+                        const start = start_token.text(self.tokenizer.bytes);
+                        // allow single lower or uppercase ascii letters followed by '.' or ')'
+                        // to start a list as well
+                        if (start.len == 1) {
+                            var ol_type: u8 = undefined;
+                            var start_num: u16 = undefined;
+                            switch (start[0]) {
+                                'a'...'z' => {
+                                    ol_type = 'a';
+                                    start_num = start[0] - 'a' + 1;
+                                },
+                                'A'...'Z' => {
+                                    ol_type = 'A';
+                                    start_num = start[0] - 'A' + 1;
+                                },
+                                else => return try self.parse_paragraph(),
+                            }
+                            self.eat_token();
+                            const next_token = self.peek_token();
+                            self.eat_token();
 
-                // var token_kind = self.peek_token().token_kind;
-                // while (token_kind != TokenKind.Newline and token_kind != TokenKind.Eof) {
-                //     // std.debug.print("Ate token {} ln {}\n", .{ token_kind, self.peek_token().line_nr });
-                //     self.eat_token();
-                //     token_kind = self.peek_token().token_kind;
-                // }
-                // // will end on newline token -> need to advance one more
-                // self.eat_token();
+                            try self.require_token(TokenKind.Space, " after list item starter!");
+                            self.eat_token();
+                            try self.parse_ordered_list(
+                                next_token.token_kind, start_token.column,
+                                prev_line_blank, start_num, ol_type);
+                        } else {
+                            try self.parse_paragraph();
+                        }
+                    },
+                    else => try self.parse_paragraph(),
+                }
+            },
+            else => {
                 try self.parse_paragraph();
             },
         }
@@ -737,10 +772,10 @@ pub const Parser = struct {
     fn can_list_continue(
         self: *Parser,
         comptime new_list: NodeKind,
-        // instead of making this a *const Token we could also just pass this as Token
-        // and let the compiler decide whether it's more efficient to pass by value or ref
-        start_token: *const Token,
-        prev_line_blank: bool
+        start_token_kind: TokenKind,
+        start_column: u16,     // column the list item itself (not the content starts on): ->1. or ->-
+        prev_line_blank: bool,
+        ol_type: u8,
     ) bool {
         const last_block_data = self.get_last_block().data;
         var list_data: Node.ListItemData = undefined;
@@ -759,9 +794,14 @@ pub const Parser = struct {
 
         // NOTE: list's loose status should already have been determined
         // before closing the list so we only have to check when we continue
-        if (start_token.column == list_data.indent) {
+        if (start_column == list_data.indent) {
             if (last_block_data == new_list) {
-                if (list_data.list_item_starter == start_token.token_kind) {
+                if (list_data.list_item_starter == start_token_kind and list_data.ol_type == ol_type) {
+                    // if (last_block_data == .OrderedListItem and list_data.ol_type != ol_type) {
+                    //     // same list type, same indent, same 2nd list starter, different ol type
+                    //     self.close_list(prev_line_blank);
+                    //     return false;
+                    // }
                     // same list type, same indent, same list starter
                     self.close_last_block();
                     return true;
@@ -776,14 +816,14 @@ pub const Parser = struct {
                 self.close_list(prev_line_blank);
                 return false;
             }
-        } else if (start_token.column < list_data.indent) {
+        } else if (start_column < list_data.indent) {
             // previous list was on a farther indent
             // => close it
             self.close_list(prev_line_blank);
             // test again
-            return self.can_list_continue(new_list, start_token, prev_line_blank);
+            return self.can_list_continue(new_list, start_token_kind, start_column, prev_line_blank, ol_type);
         } else {
-            // start_token.column > indent
+            // start_column > indent
             // increased indent -> don't close anything
             return false;
         }
@@ -793,20 +833,21 @@ pub const Parser = struct {
 
     fn parse_ordered_list(
         self: *Parser,
-        start_token: *const Token,
+        start_token_kind: TokenKind,  // list_item_starter e.g. '.', ')'
+        start_column: u16,          // column the list item starts on (not content): here ->1.
         prev_line_blank: bool,
-        startnum: []const u8
+        start_num: u16,
+        ol_type: u8,  // 1, a, A, i or I
     ) ParseError!void {
-        try self.handle_open_blocks(NodeKind.OrderedListItem, start_token.column, prev_line_blank);
-
-        // TODO use start number
+        try self.handle_open_blocks(NodeKind.OrderedListItem, start_column, prev_line_blank);
 
         var list_node: *Node = undefined;
         // create new list if it can't continue
-        if (!self.can_list_continue(NodeKind.OrderedListItem, start_token, prev_line_blank)) {
+        if (!self.can_list_continue(
+                NodeKind.OrderedListItem, start_token_kind, start_column, prev_line_blank, ol_type)) {
             list_node = try self.new_node(self.get_last_block());
             list_node.data = .{
-                .OrderedList = .{ .blank_lines = 0, .start = startnum, },
+                .OrderedList = .{ .blank_lines = 0, .start_num = start_num, .ol_type = ol_type },
             };
             self.open_block(list_node);
         } else {
@@ -817,24 +858,31 @@ pub const Parser = struct {
         var list_item_node = try self.new_node(list_node);
         list_item_node.data = .{
             .OrderedListItem = .{ 
-                .list_item_starter = start_token.token_kind,
-                .indent = start_token.column,
+                .list_item_starter = start_token_kind,
+                .indent = start_column,
+                .ol_type = ol_type,
             },
         };
         self.open_block(list_item_node);
     }
 
-    fn parse_unordered_list(self: *Parser, start_token: *const Token, prev_line_blank: bool) ParseError!void {
-        try self.handle_open_blocks(NodeKind.UnorderedListItem, start_token.column, prev_line_blank);
+    fn parse_unordered_list(
+        self: *Parser,
+        start_token_kind: TokenKind,
+        start_column: u16,
+        prev_line_blank: bool
+    ) ParseError!void {
+        try self.handle_open_blocks(NodeKind.UnorderedListItem, start_column, prev_line_blank);
         // if one blank line is present in the contents of any of the list items
         // the list will be loose
 
         var list_node: *Node = undefined;
         // create new list if it can't continue
-        if (!self.can_list_continue(NodeKind.UnorderedListItem, start_token, prev_line_blank)) {
+        if (!self.can_list_continue(
+                NodeKind.UnorderedListItem, start_token_kind, start_column, prev_line_blank, 0)) {
             list_node = try self.new_node(self.get_last_container_block());
             list_node.data = .{
-                .UnorderedList = .{ .blank_lines = 0, .start = "" },
+                .UnorderedList = .{ .blank_lines = 0, .start_num = 0, .ol_type = 0 },
             };
             self.open_block(list_node);
         } else {
@@ -845,8 +893,9 @@ pub const Parser = struct {
         var list_node_item = try self.new_node(list_node);
         list_node_item.data = .{
             .UnorderedListItem = .{
-                .list_item_starter = start_token.token_kind,
-                .indent = start_token.column,
+                .list_item_starter = start_token_kind,
+                .indent = start_column,
+                .ol_type = 0,
             },
         };
         self.open_block(list_node_item);
