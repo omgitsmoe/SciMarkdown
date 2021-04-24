@@ -104,25 +104,28 @@ pub const CodeRunner = struct {
                                 // to the passed connection
                                 //
                                 // sink() or sink(file = NULL) ends the last diversion
-                                // (there is a diversion stack)
+                                // (there is a diversion stack) of the specified type
                                 // but calling sink twice for our stdout+err diversions warns
                                 // about there not being a sink to remove
+                                // can't reset the stdout_buf vector (functional language YAY)
+                                // and re-assigning errors since there's a binding to out_tcon
+                                // -> close and then re-open connection
                                 try self.merged_code.appendSlice(
                                     \\
                                     \\sink()
+                                    \\sink(type="message")
                                     \\write_to_con_with_length(stdout_buf, stdout())
                                     \\write_to_con_with_length(stderr_buf, stderr())
+                                    \\close(out_tcon)
+                                    \\close(err_tcon)
+                                    \\stdout_buf <- vector("character")
+                                    \\stderr_buf <- vector("character")
+                                    \\out_tcon <- textConnection('stdout_buf', 'wr', local = TRUE)
+                                    \\err_tcon <- textConnection('stderr_buf', 'wr', local = TRUE)
                                     \\sink(out_tcon)
                                     \\sink(err_tcon, type="message")
                                     \\
                                 );
-                                    // \\sink()
-                                    // \\write_to_con_with_length(stdout_buf, stdout())
-                                    // \\write_to_con_with_length(stderr_buf, stderr())
-                                    // \\stdout_buf <- vector("character")
-                                    // \\stderr_buf <- vector("character")
-                                    // \\sink(out_tcon)
-                                    // \\sink(err_tcon, type="message")
                             },
                             else => {},
                         }
@@ -141,6 +144,7 @@ pub const CodeRunner = struct {
                 try self.merged_code.appendSlice(
                     \\
                     \\sink()
+                    \\sink(type="message")
                     \\close(err_tcon)
                     \\close(out_tcon)
                 );
@@ -188,10 +192,6 @@ pub const CodeRunner = struct {
 
         _ = try self.runner.wait();
         std.debug.print("Done waiting on child!\n", .{});
-
-        if (self.lang == .R) {
-            std.debug.print("R stdout:\n{}\n", .{ stdout });
-        }
 
         switch (self.lang) {
             .R => {
@@ -262,6 +262,7 @@ pub const CodeRunner = struct {
                 self.code_datas.items[code_chunk].stderr = chunk_out;
             }
             code_chunk += 1;
+
         }
     }
 };
