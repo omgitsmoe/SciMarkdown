@@ -227,6 +227,16 @@ plt.ylabel('some numbers')
 print("second print")
 ```
 
+```r
+print("r test")
+write("stderr r test", stderr())
+```
+
+```r
+print("other chunk")
+print(5 * 25)
+```
+
 ```
 %% same comment token as we have
 No language indicated, so no syntax highlighting. 

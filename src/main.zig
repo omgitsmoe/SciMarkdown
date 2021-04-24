@@ -41,6 +41,10 @@ pub fn mainArgs(allocator: *std.mem.Allocator, args: []const []const u8) !void {
     defer code_runner.deinit();
     try code_runner.run();
 
+    var r_code_runner = try CodeRunner.init(allocator, .R, parser.current_document);
+    defer r_code_runner.deinit();
+    try r_code_runner.run();
+
     const bib_entries = try run_citeproc(&parser.node_arena.allocator, parser.citations.items);
     if (parser.bibliography) |bib| {
         for (bib_entries) |entry| {

@@ -46,6 +46,7 @@ pub const Language = enum {
 };
 
 const python_helper = @embedFile("./lang_helpers/python.py");
+const r_helper = @embedFile("./lang_helpers/R.r");
 
 pub const CodeRunner = struct {
     code_datas: std.ArrayList(*ast.Node.CodeData),
@@ -76,14 +77,14 @@ pub const CodeRunner = struct {
     fn gather_code_blocks(self: *CodeRunner, root_node: *ast.Node) !void {
         var dfs = DFS(ast.Node, true).init(root_node);
 
-        // const path = try fs.realpathAlloc(code_datas.allocator, "./lang_helpers");
-        // defer code_datas.allocator.free(path);
-
         switch(self.lang) {
             .Python => try self.merged_code.appendSlice(python_helper),
+            .R => try self.merged_code.appendSlice(r_helper),
             else => {},
         }
 
+        // TODO make self.lang comptime so these switches won't be at runtime
+        // or as comptime proc argument
         const lang = self.lang;
         while (dfs.next()) |node_info| {
             if (!node_info.is_end)
@@ -98,6 +99,31 @@ pub const CodeRunner = struct {
                         switch (self.lang) {
                             .Python => try self.merged_code.appendSlice(
                                 "\n\nsys.stdout.real_flush()\nsys.stderr.real_flush()\n\n"),
+                            .R => {
+                                // using sink(connection) to divert stdout or stderr output
+                                // to the passed connection
+                                //
+                                // sink() or sink(file = NULL) ends the last diversion
+                                // (there is a diversion stack)
+                                // but calling sink twice for our stdout+err diversions warns
+                                // about there not being a sink to remove
+                                try self.merged_code.appendSlice(
+                                    \\
+                                    \\sink()
+                                    \\write_to_con_with_length(stdout_buf, stdout())
+                                    \\write_to_con_with_length(stderr_buf, stderr())
+                                    \\sink(out_tcon)
+                                    \\sink(err_tcon, type="message")
+                                    \\
+                                );
+                                    // \\sink()
+                                    // \\write_to_con_with_length(stdout_buf, stdout())
+                                    // \\write_to_con_with_length(stderr_buf, stderr())
+                                    // \\stdout_buf <- vector("character")
+                                    // \\stderr_buf <- vector("character")
+                                    // \\sink(out_tcon)
+                                    // \\sink(err_tcon, type="message")
+                            },
                             else => {},
                         }
                     }
@@ -110,10 +136,20 @@ pub const CodeRunner = struct {
 
         switch(self.lang) {
             .Python => try self.merged_code.appendSlice("sys.exit(0)"),
+            .R => {
+                // close textconnections
+                try self.merged_code.appendSlice(
+                    \\
+                    \\sink()
+                    \\close(err_tcon)
+                    \\close(out_tcon)
+                );
+            },
             else => {},
         }
 
-        std.debug.print("Lang: {} Code generated: \n{}\n---\n", .{ @tagName(self.lang), self.merged_code.items });
+        std.debug.print(
+            "Lang: {} Code generated: \n{}\n---\n", .{ @tagName(self.lang), self.merged_code.items });
     }
 
     pub fn run(self: *CodeRunner) !void {
@@ -153,12 +189,24 @@ pub const CodeRunner = struct {
         _ = try self.runner.wait();
         std.debug.print("Done waiting on child!\n", .{});
 
-        self.assign_output_to_nodes(stdout, false);
-        self.assign_output_to_nodes(stderr, true);
+        if (self.lang == .R) {
+            std.debug.print("R stdout:\n{}\n", .{ stdout });
+        }
+
+        switch (self.lang) {
+            .R => {
+                self.assign_output_to_nodes_text(stdout, false);
+                self.assign_output_to_nodes_text(stderr, true);
+            },
+            else => {
+                self.assign_output_to_nodes_bin(stdout, false);
+                self.assign_output_to_nodes_bin(stderr, true);
+            },
+        }
     }
 
 
-    fn assign_output_to_nodes(self: *CodeRunner, bytes: []const u8, comptime is_err: bool) void {
+    fn assign_output_to_nodes_bin(self: *CodeRunner, bytes: []const u8, comptime is_err: bool) void {
         var i: u32 = 0;
         var code_chunk: u16 = 0;
         while (i < bytes.len) {
@@ -179,6 +227,34 @@ pub const CodeRunner = struct {
                 std.debug.print("\nOUT:\n'''{}'''\n----------\n", .{ chunk_out });
             }
             i += 4 + chunk_out_len;
+
+            if (!is_err) {
+                self.code_datas.items[code_chunk].stdout = chunk_out;
+            } else {
+                self.code_datas.items[code_chunk].stderr = chunk_out;
+            }
+            code_chunk += 1;
+        }
+    }
+
+    fn assign_output_to_nodes_text(self: *CodeRunner, bytes: []const u8, comptime is_err: bool) void {
+        var i: u32 = 0;
+        var code_chunk: u16 = 0;
+        while (i < bytes.len) {
+            // chunk out length as text followed by ';'
+            var text_len_start = i;
+            while (bytes[i] != ';') : ( i += 1 ) {}
+            var text_len_end = i;
+            i += 1;  // skip ;
+            const chunk_out_len = std.fmt.parseUnsigned(
+                u32, bytes[text_len_start..text_len_end], 10) catch unreachable;
+
+            var chunk_out: ?[]const u8 = null;
+            if (chunk_out_len > 0) {
+                chunk_out = bytes[i..i + chunk_out_len];
+                std.debug.print("\nOUT:\n'''{}'''\n----------\n", .{ chunk_out });
+            }
+            i += chunk_out_len;
 
             if (!is_err) {
                 self.code_datas.items[code_chunk].stdout = chunk_out;
