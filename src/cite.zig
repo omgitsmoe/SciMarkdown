@@ -212,7 +212,7 @@ pub fn run_citeproc(allocator: *std.mem.Allocator, cite_nodes: []*Node) ![]*Node
     };
 
     const cmd = &[_][]const u8{
-        "vendor\\citeproc.exe", "--references=vendor\\test.json",
+        "vendor\\citeproc.exe", "--references=bib.json",
         "--style=vendor\\apa-6th-edition.csl",
         "--format=json",
     };
@@ -225,13 +225,8 @@ pub fn run_citeproc(allocator: *std.mem.Allocator, cite_nodes: []*Node) ![]*Node
     // order important otherwise stdin etc. not initialized
     try runner.spawn();
 
-    var string = std.ArrayList(u8).init(allocator);
-    defer string.deinit();
-    try std.json.stringify(to_citeproc, .{}, string.writer());
-    std.debug.print("IN:\n{}\n", .{ string.items });
-
+    try std.json.stringify(to_citeproc, .{}, runner.stdin.?.writer());
     // write program code to stdin
-    try runner.stdin.?.writer().writeAll(string.items);
     runner.stdin.?.close();
     // has to be set to null otherwise the ChildProcess tries to close it again
     // and hits unreachable code

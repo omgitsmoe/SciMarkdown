@@ -19,12 +19,16 @@ pub const ItemType = enum {
     book,
     broadcast,
     chapter,
-    dateset,
+    classic,
+    dataset,
+    document,
     entry,
     @"entry-dictionary",
     @"entry-encyclopedia",
+    event,
     figure,
     graphic,
+    hearing,
     interview,
     legal_case,
     legislation,
@@ -35,14 +39,19 @@ pub const ItemType = enum {
     pamphlet,
     @"paper-conference",
     patent,
+    performance,
+    periodical,
     personal_communication,
     post,
     @"post-weblog",
+    regulation,
     report,
     review,
     @"review-book",
+    software,
     song,
     speech,
+    standard,
     thesis,
     treaty,
     webpage,
@@ -166,7 +175,9 @@ pub const Property = union(enum) {
     @"year-suffix": []const u8,
     // TODO custom; 'js object' with arbitrary @"key-value pairs for storing additional information
     // we currently don't need this information
-    custom,
+    // NOTE: std.json.stringify fails to stringify ObjectMap even though that's what's being used to
+    // parse objects in the json parser?
+    // custom: std.json.ObjectMap,
 };
 
 pub const OrdinaryVar = union(enum) {
@@ -181,6 +192,7 @@ pub const BoolLike = union(enum) {
     boolean: bool,
 };
 
+// TODO make these smaller they're huge
 pub const NameVar = struct {
     family: ?[]const u8 = null,
     given: ?[]const u8 = null,
@@ -270,3 +282,29 @@ pub const CitationItem = struct {
         }
     };
 };
+
+pub fn write_items_json(allocator: *std.mem.Allocator, items: []Item, out_stream: anytype) !void {
+    try out_stream.writeAll("[");
+    const len = items.len;
+    for (items) |item, i| {
+        try out_stream.writeAll("{\"type\": ");
+        try std.json.stringify(item.@"type", .{}, out_stream);
+        try out_stream.writeAll(", ");
+        try out_stream.writeAll("\"id\": ");
+        try std.json.stringify(item.id, .{}, out_stream);
+
+        var props_iter = item.optionals.iterator();
+        // const props_num = item.optionals.count();
+        while (props_iter.next()) |prop_entry| {
+            try out_stream.writeAll(", ");
+            try out_stream.writeAll("\"");
+            try out_stream.writeAll(prop_entry.key);
+            try out_stream.writeAll("\": ");
+            try std.json.stringify(prop_entry.value, .{}, out_stream);
+        }
+        try out_stream.writeAll("}");
+        if (i != len - 1)
+            try out_stream.writeAll(",");
+    }
+    try out_stream.writeAll("]");
+}

@@ -1,3 +1,4 @@
+// names all say bibtex but this is a biblatex parser
 const std = @import("std");
 const utils = @import("utils.zig");
 const expect = std.testing.expect;
@@ -15,7 +16,7 @@ pub const BibParser = struct {
         DuplicateLabel,
     };
 
-    pub fn init(allocator: *std.mem.Allocator, path: []const u8, bytes: []const u8) Error!BibParser {
+    pub fn init(allocator: *std.mem.Allocator, path: []const u8, bytes: []const u8) BibParser {
         var parser = BibParser{
             .bib = Bibliography{
                 .path = path,
@@ -407,7 +408,7 @@ test "bibparser" {
         \\@Comment{jabref-meta: databaseType:bibtex;}
     ;
 
-    var bp = try BibParser.init(alloc, "/home/test/path", bibtxt);
+    var bp = BibParser.init(alloc, "/home/test/path", bibtxt);
     var bib = try bp.parse();
     defer bib.deinit();
 
@@ -464,7 +465,7 @@ test "bibparser no leak on err" {
         \\@Article{Seidel2015,
     ;
 
-    var bp = try BibParser.init(alloc, "/home/test/path", bibtxt);
+    var bp = BibParser.init(alloc, "/home/test/path", bibtxt);
     var bib = bp.parse();
     std.testing.expectError(BibParser.Error.EndOfFile, bib);
 }
@@ -789,6 +790,7 @@ pub const EntryType = enum {
     misc,
     online,
     patent,
+    periodical,
     suppperiodical,
     proceedings,
     mvproceedings,

@@ -331,18 +331,18 @@ This line is only separated by a single newline or space, so it's a separate lin
 %% Blah blah @cites(@cite(doe99, pre=see, loc=pp. 33-35, post=and *passim*),
 %% @cite(smith04, pre=also, loc=chap. 1))
 
-Blah blah @cites(@cite(abc99,   loc    =    pp. 33-35), @cite(smith04))
+Blah blah @cites(@cite(Seidel2018,   loc    =    pp. 33-35), @cite(Burt2018))
 
-Blah blah @cite(doe99, loc=pp. 33-35\, 38-39 and *passim*).
+Blah blah @cite(Schroeder91, loc=pp. 33-35\, 38-39 and *passim*).
 
 %% Blah blah @cite(smith04 & doe99).
 
-Omit author name: Smith says blah @cite(-smith04).
+Omit author name: Carlsson says blah @cite(-Carlson1997).
 
-In-text citation: @textcite(doe99) says blah.
+In-text citation: @textcite(Pukkala1987) says blah.
 
-With locator: @textcite(smith04, loc=p. 33) says blah.
-%% error due to postional arg after kwarg: @textcite(smith04, loc=p. 33, error)
+With locator: @textcite(Biging1992, loc=p. 33) says blah.
+%% error due to postional arg after kwarg: @textcite(Biging1992, loc=p. 33, error)
 
 ## Bibliography
 
