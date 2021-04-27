@@ -73,8 +73,8 @@ pub fn nodes_from_citeproc_json(
     for (bibliography.Array.items) |bib_entry| {
         const entry_node = try Node.create(allocator);
         // NOTE: only passing string ids to citeproc so we can only expect string ids back
-        const entry_id = bib_entry.Array.items[0].String;
-        std.debug.print("BIB ENTRY ID: {}\n", .{ entry_id });
+        const entry_id = try allocator.dupe(u8, bib_entry.Array.items[0].String);
+        // std.debug.print("BIB ENTRY ID: {}\n", .{ entry_id });
         entry_node.data = .{
             .BibEntry = .{ .id = entry_id },
         };
@@ -95,20 +95,25 @@ fn nodes_from_formatted(
 ) !void {
 
     // TODO instead of chaning the BuiltinCall node to Citation
-    // use Citation node for a single "CitatioItem" in the sense of csl/citeproc
+    // use Citation node for a single "CitationItem" in the sense of csl/citeproc
     // and store the id so we can later generate a link to the corresponding bibentry
     for (formatted_items) |formatted| {
         switch (formatted) {
             .String => |str| {
                 const txt_node = try Node.create(allocator);
+                // NOTE: json.Parser re-allocates strings if there is an escape token (\)
+                // inside them -> dupe them (otherwise we can't free the ValueTree
+                // returned from the parser)
+                // (unfortunately no S.escapes is available like in the json.Parser itself
+                //  to check if there are escapes)
                 txt_node.data = .{
-                    .Text = .{ .text = str },
+                    .Text = .{ .text = try allocator.dupe(u8, str) },
                 };
                 first_parent.append_child(txt_node);
             },
             .Object => |obj| {
                 const format = std.meta.stringToEnum(Format, obj.get("format").?.String).?;
-                std.debug.print("{} -> ", .{ format });
+                // std.debug.print("{} -> ", .{ format });
                 var parent: *Node = undefined;
                 switch (format) {
                     .italics => {
@@ -156,16 +161,16 @@ fn nodes_from_formatted(
                 for (contents.Array.items) |str| {
                     var txt_node = try Node.create(allocator);
                     txt_node.data = .{
-                        .Text = .{ .text = str.String },
+                        .Text = .{ .text = try allocator.dupe(u8, str.String) },
                     };
                     parent.append_child(txt_node);
                     
-                    std.debug.print("{}", .{ str });
+                    // std.debug.print("{}", .{ str });
                 }
             },
             else => unreachable,
         }
-        std.debug.print("\n", .{});
+        // std.debug.print("\n", .{});
     }
 }
 
@@ -190,7 +195,11 @@ pub fn run_citeproc(allocator: *std.mem.Allocator, cite_nodes: []*Node) ![]*Node
     for (cite_nodes) |cite| {
         if (cite.data.BuiltinCall.result) |result| {
             switch (result.*) {
-                .cite => |single_cite| try citations.append(&[1]CitationItem { single_cite }),
+                // same problem as below: &[1]CitationItem { single_cite }
+                // for casting a single item ptr x to a slice:
+                // ([]T)(*[1]T)(&x)  (using old casting syntax)
+                // I guess the first cast is now implicit
+                .cite => |*single_cite| try citations.append(@as(*[1]CitationItem, single_cite)),
                 // NOTE: this just overwrites the previous one that was appended
                 // since |two_cites| will be the values copied on the stack (which is [2]CitationItem)
                 // .textcite => |two_cites| try citations.append(two_cites[0..]),
@@ -238,13 +247,11 @@ pub fn run_citeproc(allocator: *std.mem.Allocator, cite_nodes: []*Node) ![]*Node
     // weirdly only WindowsTerminal seems to have a problem with it and stops
     // responding, cmd.exe works fine as does running it in a debugger
     const stdout = try runner.stdout.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
-    errdefer allocator.free(stdout);
-    std.debug.print("Done reading from stdout!\nOUT:\n{}\n", .{ stdout });
+    defer allocator.free(stdout);
+    // std.debug.print("Done reading from citeproc stdout!\nOUT:\n{}\n", .{ stdout });
     const stderr = try runner.stderr.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
-    errdefer allocator.free(stderr);
-    std.debug.print("Done reading from stderr!\nERR:\n{}\n", .{ stderr });
-    // TODO stderr not used currently
-    allocator.free(stderr);
+    defer allocator.free(stderr);
+    std.debug.print("Done reading from citeproc stderr!\nERR:\n{}\n", .{ stderr });
 
     _ = try runner.wait();
 

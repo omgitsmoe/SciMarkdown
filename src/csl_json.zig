@@ -208,17 +208,54 @@ pub const NameVar = struct {
 
 pub const DateVar = union(enum) {
     // Extended Date/Time Format (EDTF) string
+    // https://www.loc.gov/standards/datetime/
     edtf: []const u8,
     date: Date,
 
+    pub const DateParts = std.ArrayList(std.ArrayList(?OrdinaryVar));
     pub const Date = struct {
         // 1-2 of 1-3 items [2][3]OrdinaryVar
-        @"date-parts": [][]OrdinaryVar,
-        season: OrdinaryVar,
-        circa: BoolLike,
-        literal: []const u8,
-        raw: []const u8,
-        edtf: []const u8,
+        @"date-parts": ?*DateParts = null,
+        season: ?OrdinaryVar = null,
+        circa: ?BoolLike = null,
+        literal: ?[]const u8 = null,
+        raw: ?[]const u8 = null,
+        edtf: ?[]const u8 = null,
+
+        pub fn jsonStringify(
+            value: @This(),
+            options: std.json.StringifyOptions,
+            out_stream: anytype,
+        ) !void {
+            try out_stream.writeByte('{');
+
+            if (value.@"date-parts") |parts| {
+                try out_stream.writeAll("\"date-parts\":");
+                try out_stream.writeByte('[');
+                for (parts.items) |ord_arr, arr_i| {
+                    if (arr_i != 0)
+                        try out_stream.writeByte(',');
+                    try std.json.stringify(ord_arr.items, options, out_stream);
+                }
+                try out_stream.writeByte(']');
+            }
+            // iterate over struct fields
+            inline for (@typeInfo(@This()).Struct.fields) |Field, field_i| {
+                comptime {
+                    if (std.mem.eql(u8, Field.name, "date-parts")) {
+                        continue;
+                    }
+                }
+
+                if (field_i != 0)
+                    try out_stream.writeByte(',');
+
+                try std.json.stringify(Field.name, options, out_stream);
+                try out_stream.writeByte(':');
+                try std.json.stringify(@field(value, Field.name), options, out_stream);
+            }
+            try out_stream.writeByte('}');
+        }
     };
 };
 
@@ -284,7 +321,7 @@ pub const CitationItem = struct {
 };
 
 pub fn write_items_json(allocator: *std.mem.Allocator, items: []Item, out_stream: anytype) !void {
-    try out_stream.writeAll("[");
+    try out_stream.writeByte('[');
     const len = items.len;
     for (items) |item, i| {
         try out_stream.writeAll("{\"type\": ");
@@ -302,9 +339,9 @@ pub fn write_items_json(allocator: *std.mem.Allocator, items: []Item, out_stream
             try out_stream.writeAll("\": ");
             try std.json.stringify(prop_entry.value, .{}, out_stream);
         }
-        try out_stream.writeAll("}");
+        try out_stream.writeByte('}');
         if (i != len - 1)
-            try out_stream.writeAll(",");
+            try out_stream.writeByte(',');
     }
-    try out_stream.writeAll("]");
+    try out_stream.writeByte(']');
 }

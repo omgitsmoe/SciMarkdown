@@ -589,6 +589,7 @@ pub const ListField = struct {
         var state = NameState.first;
         var i: u16 = 0;
         var last_end: u16 = 0; // exclusive
+        var last_word_start: u16 = 0; // inclusive
         var prev_whitespace = false;
         while (i < name.len) : ( i += 1 ) {
             if (utils.is_whitespace(name[i])) {
@@ -603,7 +604,7 @@ pub const ListField = struct {
                         switch (state) {
                             .first => {
                                 state = .prefix;
-                                // -2 to not include last space
+                                // -1 to not include last space
                                 result.first = name[last_end..i-1];
                                 last_end = i;
                             },
@@ -614,7 +615,7 @@ pub const ListField = struct {
                         switch (state) {
                             .prefix => {
                                 state = .last;
-                                // -2 to not include last space
+                                // -1 to not include last space
                                 result.prefix = name[last_end..i-1];
                                 last_end = i;
                             },
@@ -624,9 +625,22 @@ pub const ListField = struct {
                     else => {},
                 }
                 prev_whitespace = false;
+                last_word_start = i;
             }
         }
-        result.last = name[last_end..];
+        // no words starting with a lowercase letter -> no prefix
+        // btparse then just treats the whole string as first
+        // but biblatex seems to interpret First Last correctly
+        if (state == .first) {
+            if (last_word_start != 0) {
+                result.first = name[0..last_word_start - 1];
+                result.last = name[last_word_start..];
+            } else {
+                result.last = name[0..];
+            }
+        } else {
+            result.last = name[last_end..];
+        }
 
         return result;
     }
@@ -704,6 +718,25 @@ test "parse name simple" {
     expect(std.mem.eql(u8, res.first.?, "First"));
     expect(std.mem.eql(u8, res.prefix.?, "von"));
     expect(std.mem.eql(u8, res.last.?, "Last"));
+    expect(res.suffix == null);
+
+    res = try ListField.parse_name("First Last");
+    expect(std.mem.eql(u8, res.first.?, "First"));
+    expect(res.prefix == null);
+    expect(std.mem.eql(u8, res.last.?, "Last"));
+    expect(res.suffix == null);
+
+    // currently not stripping whitespace in the First Last case
+    res = try ListField.parse_name("First    Last  ");
+    expect(std.mem.eql(u8, res.first.?, "First   "));
+    expect(res.prefix == null);
+    expect(std.mem.eql(u8, res.last.?, "Last  "));
+    expect(res.suffix == null);
+
+    res = try ListField.parse_name("Last-Last");
+    expect(res.first == null);
+    expect(res.prefix == null);
+    expect(std.mem.eql(u8, res.last.?, "Last-Last"));
     expect(res.suffix == null);
 
     res = try ListField.parse_name("First J. Other von da of Last Last");
