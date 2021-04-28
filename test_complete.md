@@ -227,6 +227,8 @@ plt.ylabel('some numbers')
 print("second print")
 ```
 
+Python inline: >`py print("printed from within python")`
+
 ```r
 print("r test")
 write("stderr r test", stderr())
@@ -236,6 +238,10 @@ write("stderr r test", stderr())
 print("other chunk")
 print(5 * 25)
 ```
+
+R inline: >`r cat("printed from within R")`
+
+R inline with print: >`r print("printed from within R")`
 
 ```
 %% same comment token as we have
@@ -310,32 +316,9 @@ This line is only separated by a single newline or space, so it's a separate lin
 
 ## Citations
 
-%% Markdown citations go inside square brackets and are separated by semicolons. Each citation must
-%% have a key, composed of ‘@’ + the citation identifier from the database, and may optionally have a
-%% prefix, a locator, and a suffix.
-%% pandoc comparison:
-%% Blah blah [see @doe99, pp. 33-35; also @smith04, chap. 1].
-%% 
-%% Blah blah [@doe99, pp. 33-35, 38-39 and *passim*].
-%% 
-%% Blah blah [@smith04; @doe99].
-%% 
-%% Omit author name: Smith says blah [-@smith04].
-%% 
-%% In-text citation: @smith04 says blah.
-%%
-%% With locator: @smith04 [p. 33] says blah.
-%% Blah blah @cite(doe99, pre=see, loc=pp. 33-35, post=and *passim* & smith04, pre=also, loc=chap. 1)
-
-%% cite only for one citation?
-%% Blah blah @cites(@cite(doe99, pre=see, loc=pp. 33-35, post=and *passim*),
-%% @cite(smith04, pre=also, loc=chap. 1))
-
 Blah blah @cites(@cite(Seidel2018,   loc    =    pp. 33-35), @cite(Burt2018))
 
 Blah blah @cite(Schroeder91, loc=pp. 33-35\, 38-39 and *passim*).
-
-%% Blah blah @cite(smith04 & doe99).
 
 Omit author name: Carlsson says blah @cite(-Carlson1997).
 

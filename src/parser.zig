@@ -497,13 +497,13 @@ pub const Parser = struct {
                 const lang_name_end = self.peek_token().start;
                 self.eat_token();
 
-
                 var code_node = try self.new_node(self.get_last_block());
                 code_node.data = .{
                     .FencedCode = .{
                         .language = Language.match(
                             self.tokenizer.bytes[lang_name_start..lang_name_end]),
                         .code = undefined,
+                        .run = true,
                     },
                 };
                 self.open_block(code_node);
@@ -956,6 +956,50 @@ pub const Parser = struct {
         }
     }
 
+    fn parse_code_span(self: *Parser, delimiter: TokenKind, comptime run: bool) ParseError!void {
+        // delimiter -> if code span contains a ` you can use `` to start/end a code span
+        self.eat_token();
+
+        const code_span = try self.new_node(self.get_last_block());
+
+        const maybe_lang_tok = self.peek_token();
+        const lang = Language.match(self.tokenizer.bytes[maybe_lang_tok.start..maybe_lang_tok.end]);
+        code_span.data = .{
+            .CodeSpan = .{
+                .language = lang,
+                .code = undefined,
+                .run = run,
+            }
+        };
+        // eat lang name if it could be matched
+        if (lang != .Unknown) {
+            self.eat_token();
+            self.eat_token();  // eat ' '
+        }
+
+        var ctoken = self.peek_token();
+        const code_span_start = ctoken;
+        while (ctoken.token_kind != delimiter) : ({
+            // while continue expression (executed on every loop as well as when a 
+            // continue happens)
+            self.eat_token();
+            ctoken = self.peek_token();
+        }) {
+            if (ctoken.token_kind == TokenKind.Eof) {
+                Parser.report_error(
+                    "ln:{}: Encountered end of file inside code span (`...`)",
+                    .{ code_span_start.line_nr });
+                return ParseError.SyntaxError;
+            }
+        }
+
+        code_span.data.CodeSpan.code = self.tokenizer.bytes[code_span_start.start..self.peek_token().start];
+        self.eat_token();  // eat closing ` or ``
+
+        std.debug.print("ln:{}: Code span {}\n",
+            .{ code_span_start.line_nr, code_span.data });
+    }
+
     /// returns bool determining whether inline parsing should continue
     fn parse_inline(self: *Parser, comptime end_on_newline: bool) ParseError!bool {
         const token = self.peek_token();
@@ -1075,37 +1119,14 @@ pub const Parser = struct {
                 }
                 self.eat_token();
             },
+            .Run_codespan => {
+                try self.parse_code_span(.Backtick, true);
+            },
+            .Run_codespan_alt => {
+                try self.parse_code_span(.Backtick_double, true);
+            },
             TokenKind.Backtick, TokenKind.Backtick_double => {
-                // TODO lang name
-                // if code span contains a ` you can use `` to start/end a code span
-                const delimiter = token.token_kind;
-                self.eat_token();
-                var ctoken = self.peek_token();
-                const code_span_start = ctoken;
-                while (ctoken.token_kind != delimiter) : ({
-                    // while continue expression (executed on every loop as well as when a 
-                    // continue happens)
-                    self.eat_token();
-                    ctoken = self.peek_token();
-                }) {
-                    if (ctoken.token_kind == TokenKind.Eof) {
-                        Parser.report_error(
-                            "ln:{}: Encountered end of file inside code span (`...`)",
-                            .{ code_span_start.line_nr });
-                        return ParseError.SyntaxError;
-                    }
-                }
-
-                const code_span = try self.new_node(self.get_last_block());
-                code_span.data = .{
-                    .CodeSpan = .{ 
-                        .text = self.tokenizer.bytes[code_span_start.start..self.peek_token().start]
-                    }
-                };
-                self.eat_token();  // eat closing `
-
-                std.debug.print("ln:{}: Code span: `{}`\n",
-                    .{ code_span_start.line_nr, code_span.data.CodeSpan.text });
+                try self.parse_code_span(token.token_kind, false);
             },
             TokenKind.Dollar => {
                 //  check if a digit follows immediately after and then just parse it as text

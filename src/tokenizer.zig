@@ -48,6 +48,10 @@ pub const TokenKind = enum {
     Backtick,
     Backtick_double,
     Backtick_triple,
+    // TODO change the rest to also have their meaning/effect as their name
+    // (if they have max. 2 different effects)
+    Run_codespan,
+    Run_codespan_alt,
 
     Backslash,
 
@@ -109,6 +113,8 @@ pub const TokenKind = enum {
             .Backtick => "`",
             .Backtick_triple => "``",
             .Backtick_double => "```",
+            .Run_codespan => ">`",
+            .Run_codespan_alt => ">``",
 
             .Backslash => "\\",
 
@@ -453,7 +459,18 @@ pub const Tokenizer = struct {
                     }
                 },
                 '<' => .Open_angle_bracket,
-                '>' => .Close_angle_bracket,
+                '>' => blk: {
+                    if (self.peek_next_byte() == @as(u8, '`')) {
+                        self.prechecked_advance_to_next_byte();
+                        if (self.peek_next_byte() == @as(u8, '`')) {
+                            self.prechecked_advance_to_next_byte();
+                            break :blk TokenKind.Run_codespan_alt;
+                        }
+                        break :blk TokenKind.Run_codespan;
+                    } else {
+                        break :blk TokenKind.Close_angle_bracket;
+                    }
+                },
 
                 '"' => blk: {
                     if (self.peek_next_byte() == @as(u8, '"')) {

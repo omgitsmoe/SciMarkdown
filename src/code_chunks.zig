@@ -91,8 +91,8 @@ pub const CodeRunner = struct {
                 continue;
 
             switch (node_info.data.data) {
-                .FencedCode => |*data| {
-                    if (data.language == lang) {
+                .FencedCode, .CodeSpan => |*data| {
+                    if (data.language == lang and data.run) {
                         try self.code_datas.append(data);
 
                         try self.merged_code.appendSlice(data.code);
@@ -110,14 +110,17 @@ pub const CodeRunner = struct {
                                 // can't reset the stdout_buf vector (functional language YAY)
                                 // and re-assigning errors since there's a binding to out_tcon
                                 // -> close and then re-open connection
+                                // the connection needs to be close before sending the buf contents
+                                // to stdout otherwise some content might not be written to the
+                                // buf yet, since it only flushes once a \n is reached
                                 try self.merged_code.appendSlice(
                                     \\
                                     \\sink()
                                     \\sink(type="message")
-                                    \\write_to_con_with_length(stdout_buf, stdout())
-                                    \\write_to_con_with_length(stderr_buf, stderr())
                                     \\close(out_tcon)
                                     \\close(err_tcon)
+                                    \\write_to_con_with_length(stdout_buf, stdout())
+                                    \\write_to_con_with_length(stderr_buf, stderr())
                                     \\stdout_buf <- vector("character")
                                     \\stderr_buf <- vector("character")
                                     \\out_tcon <- textConnection('stdout_buf', 'wr', local = TRUE)
@@ -131,8 +134,6 @@ pub const CodeRunner = struct {
                         }
                     }
                 },
-                // .CodeSpan => {
-                // },
                 else => {},
             }
         }

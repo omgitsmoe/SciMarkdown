@@ -209,9 +209,13 @@ pub const HTMLGenerator = struct {
                     }
                 },
                 .CodeSpan => |code| {
-                    try self.html_buf.appendSlice("<code>");
-                    try self.html_buf.appendSlice(code.text);
-                    try self.html_buf.appendSlice("</code>");
+                    if (code.stdout) |out| {
+                        try self.html_buf.appendSlice(out);
+                    } else {
+                        try self.html_buf.appendSlice("<code>");
+                        try self.html_buf.appendSlice(code.code);
+                        try self.html_buf.appendSlice("</code>");
+                    }
                 },
                 .Link => |link| {
                     var link_url: []const u8 = undefined;

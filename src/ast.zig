@@ -26,7 +26,7 @@ pub const Node = struct {
     pub const LinkData = struct { label: ?[]const u8, url: ?[]const u8, title: ?[]const u8};
     pub const EmphData = struct { opener_token_kind: TokenKind };
     pub const ListData = struct { blank_lines: u32, start_num: u16 = 1, ol_type: u8 };
-    pub const CodeData = struct { language: Language, code: []const u8,
+    pub const CodeData = struct { language: Language, code: []const u8, run: bool,
                                   stdout: ?[]const u8 = null, stderr: ?[]const u8 = null };
     /// indent: column that list item startes need to have in order to continue the list
     ///         1. test
@@ -84,7 +84,7 @@ pub const Node = struct {
         TableRow,
 
         // inline
-        CodeSpan: struct { text: []const u8 },
+        CodeSpan: CodeData,
         MathInline: struct { text: []const u8 },
         Emphasis: EmphData,
         StrongEmphasis: EmphData,
