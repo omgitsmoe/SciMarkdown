@@ -207,6 +207,8 @@ alert(s);
 ```
 
 ```python
+@label(first-python-code-block)
+
 s = "Python syntax highlighting"
 if s == "":
     if len(s.split()) > 3:
@@ -312,6 +314,17 @@ This line is separated from the one above by two newlines, so it will be a *sepa
 
 This line is also a separate paragraph, but...
 This line is only separated by a single newline or space, so it's a separate line in the *same paragraph*.
+
+
+## Labels @label(h:labels)
+
+You can label the environment/block you're inside of by using the builtin `@label(label text)`
+
+1. @label(ol:one)
+   First ordered list item
+   multi-line [link
+   text wrap](https://google.com)
+   but this will still be rendered on one line
 
 
 ## Citations

@@ -344,7 +344,7 @@ pub inline fn can_hold(self: NodeKind, other: NodeKind) bool {
 
 pub inline fn children_allowed(self: NodeKind) bool {
     return switch (self) {
-        .Undefined, .CodeSpan, .ThematicBreak, .FencedCode, .LinkRef,
+        .Undefined, .CodeSpan, .ThematicBreak, .LinkRef,
         .BlankLine, .HardLineBreak, .Text, .MathInline => false,
         else => true,
     };

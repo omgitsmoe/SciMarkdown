@@ -44,7 +44,7 @@ pub const HTMLGenerator = struct {
             \\<head>
             \\<meta charset="utf-8">
             \\<meta name="viewport" content="width=device-width, initial-scale=1.0">
-            \\<script id="MathJax-script" async src="mathjax-3.1.2/tex-svg-full.js"></script>
+            \\<script id="MathJax-script" async src="vendor/mathjax-3.1.2/tex-svg-full.js"></script>
             \\</head>
             \\<body>
         );
@@ -108,6 +108,8 @@ pub const HTMLGenerator = struct {
                     }
                 },
                 .FencedCode => |code| {
+                    if (!node_info.is_end) continue;
+
                     try self.html_buf.appendSlice("<pre><code>\n");
                     try self.html_buf.appendSlice(code.code);
                     try self.html_buf.appendSlice("</code></pre>\n");
@@ -266,6 +268,20 @@ pub const HTMLGenerator = struct {
                             try self.html_buf.appendSlice("\"");
                         }
                         try self.html_buf.appendSlice(" />");
+                    }
+                },
+                .BuiltinCall => |call| {
+                    if (!node_info.is_end)
+                        continue;
+
+                    switch (call.builtin_type) {
+                        // TODO fix for nodes like e.g. FencedCode, Heading
+                        .label => {
+                            try self.html_buf.appendSlice("<span id=\"");
+                            try self.html_buf.appendSlice(call.result.?.label);
+                            try self.html_buf.appendSlice("\"></span>");
+                        },
+                        else => {},
                     }
                 },
                 .HardLineBreak => try self.html_buf.appendSlice("<br/>\n"),

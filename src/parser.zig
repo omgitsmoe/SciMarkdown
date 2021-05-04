@@ -491,10 +491,14 @@ pub const Parser = struct {
                     
                 // language name or newline
                 const lang_name_start = self.peek_token().start;
-                while (self.peek_token().token_kind != TokenKind.Newline) {
-                    self.eat_token();
+                while (true) {
+                    switch (self.peek_token().token_kind) {
+                        .Newline, .Eof => break,
+                        else => self.eat_token(),
+                    }
                 }
                 const lang_name_end = self.peek_token().start;
+                try self.require_token(.Newline, " after FencedCode block starter!");
                 self.eat_token();
 
                 var code_node = try self.new_node(self.get_last_block());
@@ -507,6 +511,27 @@ pub const Parser = struct {
                     },
                 };
                 self.open_block(code_node);
+
+                // allow builtin calls immediately after the first newline with each
+                // builtin being separated by exactly one newline
+                var tok_kind = self.peek_token().token_kind;
+                const require_extra_newline = if (tok_kind == .Builtin_call) true else false;
+                while (true) : ( tok_kind = self.peek_token().token_kind ) {
+                    if (tok_kind == .Builtin_call) {
+                        try self.parse_builtin(self.peek_token(), null);
+                        try self.require_token(
+                            .Newline, " after builtin call before the code of a FencedCode block!");
+                        self.eat_token();
+                    } else {
+                        if (require_extra_newline) {
+                            // require two newlines after the last builtin call
+                            try self.require_token(
+                                .Newline, " after the last builtin call inside of a FencedCode block!");
+                            self.eat_token();
+                        }
+                        break;
+                    }
+                }
 
                 std.debug.print("Found code block ln{}: lang_name {}\n",
                     .{ self.peek_token().line_nr, @tagName(code_node.data.FencedCode.language) });
@@ -1474,9 +1499,6 @@ pub const Parser = struct {
         };
             
         var state = State.next_pos_param;
-        // var kw_params = false;
-        // var hit_equals = false;
-        // var in_param = true;
         var tok = self.peek_token();
         var last_end = tok.start;  // exclusive
         // needed for switching to kwargs in the middle of in_pos_param
@@ -1764,6 +1786,11 @@ pub const Parser = struct {
                     }
 
                     self.bibliography = result.bibliography;
+                },
+                .label => {
+                    const persistent = try self.allocator.create(bic.BuiltinResult);
+                    persistent.* = result;
+                    builtin.data.BuiltinCall.result = persistent;
                 },
                 else => {},
             }

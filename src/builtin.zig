@@ -9,6 +9,7 @@ pub const BuiltinCall = enum {
     cites,
     bibliography,
     sc,
+    label,
 };
 
 pub const BuiltinCallInfo = struct {
@@ -23,6 +24,7 @@ pub const builtin_call_info = [_]BuiltinCallInfo {
     .{ .pos_params = -1, .kw_params = 0 },  // cites
     .{ .pos_params =  0, .kw_params = 0 },  // bibliography
     .{ .pos_params =  1, .kw_params = 0 },  // sc
+    .{ .pos_params =  1, .kw_params = 0 },  // label
 };
 
 pub const BuiltinResult = union(BuiltinCall) {
@@ -36,6 +38,7 @@ pub const BuiltinResult = union(BuiltinCall) {
     cites: []const csl.CitationItem,
     bibliography: *ast.Node,
     sc,
+    label: []const u8,
 };
 
 pub const Error = error {
@@ -154,6 +157,18 @@ pub fn evaluate_builtin(
             // there are no argument nodes to clean up
 
             result = .sc;
+        },
+        .label => {
+            var only_arg = builtin_node.first_child.?;
+            result = .{
+                .label = only_arg.first_child.?.data.Text.text,
+            };
+            // not neccessary/effective since we require to be called with the node
+            // ArenaAllocator (and freeing allocations has no effect unless it's the
+            // last allocation)
+            only_arg.delete_direct_children(allocator);
+            allocator.destroy(only_arg);
+            builtin_node.first_child = null;
         },
     }
 
