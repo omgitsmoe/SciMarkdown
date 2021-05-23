@@ -155,12 +155,12 @@ pub const Parser = struct {
 
     inline fn close_blocks_until(
         self: *Parser,
-        comptime match: fn (self: *Node) bool,
+        comptime match: fn (kind: NodeKind) bool,
         comptime close_first_match: bool
     ) void {
         var i: u8 = self.open_block_idx;
         while (i > 0) : (i -= 1) {
-            if (match(self.open_blocks[i])) {
+            if (match(self.open_blocks[i].data)) {
                 self.open_block_idx = if (!close_first_match) i else i - 1;
                 break;
             }
@@ -750,21 +750,20 @@ pub const Parser = struct {
             }
         }
 
-        if (last_block_kind == NodeKind.Paragraph) {
+        if (new_block != .Paragraph and last_block_kind == NodeKind.Paragraph) {
             try self.close_paragraph();
             last_block_kind = self.get_last_block().data;
         }
 
-        if (last_block_kind != new_block) {
-            // @CleanUp very similar version in handle_open_blocks
-            // only continue a list (only one blank line in between this and last paragraph)
-            // if it's on the same indent level (col __after__ list item starter + space)
+        var last_container: Node.NodeData = self.get_last_container_block().data;
+        if (last_container != new_block) {
             // close __all__ lists that don't match our indent!
+            // (col __after__ list item starter + space)
             while (true) {
-                // switch (self.get_last_container_block().data) {
-                switch (self.get_last_block().data) {
+                switch (last_container) {
                     .UnorderedListItem => |item| {
                         if (item.indent + 2 != starter_column) {
+                            self.close_blocks_until_kind(.UnorderedListItem, false);
                             self.close_list(prev_line_blank);
                             last_block_kind = self.get_last_block().data;
                             // prev_line_blank gets "used up" by the first list
@@ -775,6 +774,7 @@ pub const Parser = struct {
                     },
                     .OrderedListItem => |item| {
                         if (item.indent + 3 != starter_column) {
+                            self.close_blocks_until_kind(.OrderedListItem, false);
                             self.close_list(prev_line_blank);
                             last_block_kind = self.get_last_block().data;
                             // prev_line_blank gets "used up" by the first list
@@ -785,31 +785,17 @@ pub const Parser = struct {
                     },
                     else => break,
                 }
+
+                last_container = self.get_last_block().data;
             }
 
-            if (last_block_kind == NodeKind.Paragraph) {
-                try self.close_paragraph();
-                last_block_kind = self.get_last_block().data;
-            }
+            last_block_kind = self.get_last_block().data;
         }
 
-        // __after__ maybe having closed a paragraph:
-        // check if a list should remain open based on whether the column of the block starter
-        // is the same as the list item indent
-        // same -> close list since the new block start where the list item starter would
-        //         and not the list item content
-        // check for maching blocks though so a list can still be continued
-        // switch (self.get_last_block().data) {
-        //     .OrderedListItem, .UnorderedListItem => |item| {
-        //         if (item.indent == starter_column and self.get_last_block().data != new_block) {
-        //             // self.close_list(prev_line_blank);
-        //             self.close_list(prev_line_blank);
-        //         }
-        //     },
-        //     else => {},
-        // }
-
-        if (!ast.can_hold(last_block_kind, new_block)) {
+        // old/new paragraph -> will be continued
+        // otherwise check that old can hold new block kind
+        if (!(new_block == .Paragraph and last_block_kind == .Paragraph) and
+                !ast.can_hold(last_block_kind, new_block)) {
             Parser.report_error(
                 "ln:{}: Previous block of type '{}' can't hold new block of type '{}'\n",
                 .{ self.peek_token().line_nr, @tagName(last_block_kind), new_block });
