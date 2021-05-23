@@ -45,8 +45,10 @@ pub const HTMLGenerator = struct {
             \\<meta charset="utf-8">
             \\<meta name="viewport" content="width=device-width, initial-scale=1.0">
             \\<script id="MathJax-script" async src="vendor/mathjax-3.1.2/tex-svg-full.js"></script>
+            \\<link type="text/css" rel="stylesheet" href="html/style.css">
             \\</head>
             \\<body>
+            \\<div class="content-wrapper">
         );
 
         var in_compact_list = false;
@@ -110,7 +112,8 @@ pub const HTMLGenerator = struct {
                 .FencedCode => |code| {
                     if (!node_info.is_end) continue;
 
-                    try self.html_buf.appendSlice("<pre><code>\n");
+                    // no \n since the whitespace is printed verbatim in a <pre> env
+                    try self.html_buf.appendSlice("<pre><code>");
                     try self.html_buf.appendSlice(code.code);
                     try self.html_buf.appendSlice("</code></pre>\n");
 
@@ -296,7 +299,7 @@ pub const HTMLGenerator = struct {
             }
         }
 
-        try self.html_buf.appendSlice("</body>\n</html>");
+        try self.html_buf.appendSlice("</div></body>\n</html>");
         return self.html_buf.toOwnedSlice();
     }
 

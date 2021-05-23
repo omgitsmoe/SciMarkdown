@@ -1,0 +1,122 @@
+@charset "utf-8";
+
+@font-face {
+  font-family: 'Newsreader';
+  font-style: normal;
+  font-weight: 450;
+  font-display: swap;
+  src: local('Newsreader'),
+       /* relative to css file */
+       url('../fonts/Newsreader/Newsreader-VariableFont_opsz,wght.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Newsreader';
+  font-style: italic;
+  font-weight: 450;
+  font-display: swap;
+  src: local('Newsreader'),
+       url('../fonts/Newsreader/Newsreader-Italic-VariableFont_opsz,wght.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Merriweather';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Merriweather'),
+       /* relative to css file */
+       url('../fonts/Merriweather/Merriweather-Regular.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Merriweather';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Merriweather'), local('Merriweather-Italic'),
+       url('../fonts/Merriweather/Merriweather-Italic.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Noto Serif';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Noto Serif'), local('NotoSerif-Regular'),
+       /* relative to css file */
+       url('../fonts/Noto_Serif/NotoSerif-Regular.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Merriweather';
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: local('Noto Serif'), local('NotoSerif-Italic'),
+       /* relative to css file */
+       url('../fonts/Noto_Serif/NotoSerif-Italic.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Roboto';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(../fonts/Roboto/Roboto-Regular.ttf) format('truetype');
+}
+
+@font-face {
+  font-family: 'Open Sans';
+  font-style: normal;
+  font-weight: 400;
+  src: local('Open Sans Regular'), local('OpenSans-Regular'),
+       url('../fonts/Open_Sans/OpenSans-Regular.ttf') format('truetype');
+}
+
+@font-face {
+  font-family: 'Open Sans';
+  font-style: italic;
+  font-weight: 400;
+  src: local('Open Sans Italic'), local('OpenSans-Italic'),
+       url('../fonts/Open_Sans/OpenSans-Italic.ttf') format('truetype');
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-family: "Open Sans", "Arial", sans-serif;
+}
+
+body {
+    font-family: "Newsreader", serif;
+    color: #222;
+    font-size: 1.15rem;
+    line-height: 1.5;
+}
+
+div.content-wrapper {
+    margin: 2rem 10%;
+}
+
+pre > code {
+    padding: .85rem 1rem;
+    background-color: #eee;
+    display: inline-block;
+    font-size: 100%;
+    line-height: inherit;
+}
+
+code {
+    /* fix: top less padding */
+    padding: .2rem .4rem;
+    background-color: #eee;
+    margin: 0;
+    font-size: 85%;
+    line-height: 1.45;
+}
+
+blockquote {
+    margin: 0 0 .85em 1.5em;
+    padding: 0 .5em;
+    opacity: 0.85;
+    border-left: 3px solid #888;
+}
