@@ -563,7 +563,7 @@ pub fn set_bib_field_on_csl(
 
 inline fn bib_field_extract_name_list(
     allocator: *std.mem.Allocator,
-    comptime active_tag: @TagType(csl.Property),
+    comptime active_tag: std.meta.TagType(csl.Property),
     field_data: bibtex.FieldType,
     comptime copy_strings: bool,
 ) !csl.Property {
@@ -589,7 +589,7 @@ inline fn bib_field_extract_name_list(
 
 inline fn bib_field_extract_list(
     allocator: *std.mem.Allocator,
-    comptime active_tag: @TagType(csl.Property),
+    comptime active_tag: std.meta.TagType(csl.Property),
     comptime active_field_tag: bibtex.FieldTypeTT,
     field_data: bibtex.FieldType,
     comptime copy_strings: bool,

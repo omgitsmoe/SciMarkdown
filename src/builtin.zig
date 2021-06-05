@@ -105,7 +105,7 @@ pub fn evaluate_builtin(
                             else => {
                                 std.log.err(
                                     "Only calls to @cite or @textcite are allowed as arguments " ++
-                                    "to builtin call '{}'!\n",
+                                    "to builtin call '{s}'!\n",
                                     .{ @tagName(builtin_type) });
                                 return Error.ArgumentMismatch;
                             },
@@ -114,7 +114,7 @@ pub fn evaluate_builtin(
                     else => {
                         std.log.err(
                             "Only calls to @cite or @textcite are allowed as arguments " ++
-                            "to builtin call '{}'!\n",
+                            "to builtin call '{s}'!\n",
                             .{ @tagName(builtin_type) });
                         return Error.ArgumentMismatch;
                     },
@@ -123,7 +123,7 @@ pub fn evaluate_builtin(
 
             std.debug.print("Multicite:\n", .{});
             for (citations.items) |it| {
-                std.debug.print("    {}\n", .{ it });
+                std.debug.print("    {s}\n", .{ it });
             }
             std.debug.print("Multicite END\n", .{});
 
@@ -212,7 +212,7 @@ pub fn evaluate_builtin_cite(
     if (builtin_node.first_child) |fchild| {
         if (fchild.data != .PostionalArg) {
             std.log.err(
-                "Builtin call '{}' missing first postional argument 'id'!\n",
+                "Builtin call '{s}' missing first postional argument 'id'!\n",
                 .{ @tagName(builtin_type) });
             return Error.ArgumentMismatch;
         }
@@ -223,13 +223,13 @@ pub fn evaluate_builtin_cite(
             id = id[1..];
         }
         citation.id.string = id;
-        std.debug.print("First pos arg: {}\n", .{ fchild.first_child.?.data.Text.text });
+        std.debug.print("First pos arg: {s}\n", .{ fchild.first_child.?.data.Text.text });
 
         var mb_next = fchild.next;
         while (mb_next) |next| : (mb_next = next.next) {
             if (next.first_child == null or next.first_child.?.data != .Text) {
                 std.log.err(
-                    "Only textual arguments allowed for builtin call '{}'!\n",
+                    "Only textual arguments allowed for builtin call '{s}'!\n",
                     .{ @tagName(builtin_type) });
                 std.debug.print("Other data: {}\n", .{ next.data });
                 return Error.ArgumentMismatch;
@@ -248,7 +248,7 @@ pub fn evaluate_builtin_cite(
                     citation.label = loc_type;
                 } else {
                     std.log.err(
-                        "'label={}' is not a valid locator type! See " ++
+                        "'label={s}' is not a valid locator type! See " ++
                         "https://docs.citationstyles.org/en/stable/" ++
                         "specification.html#locators for valid locator types!\n",
                         .{ next.first_child.?.data.Text.text });
@@ -256,7 +256,7 @@ pub fn evaluate_builtin_cite(
                 }
             } else {
                 std.log.err(
-                    "Unexpected keyword argument '{}' for builtin call '{}'!\n",
+                    "Unexpected keyword argument '{s}' for builtin call '{s}'!\n",
                     .{ next.data.KeywordArg.keyword, @tagName(builtin_type) });
                 return Error.ArgumentMismatch;
             }

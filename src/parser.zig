@@ -228,7 +228,7 @@ pub const Parser = struct {
                             comptime expl_msg: []const u8) ParseError!void {
         const token = self.peek_token();
         if (token.token_kind != token_kind) {
-            Parser.report_error("ln:{}: Expected token '{}' found '{}'" ++ expl_msg ++ "\n",
+            Parser.report_error("ln:{}: Expected token '{s}' found '{s}'" ++ expl_msg ++ "\n",
                                 .{ token.line_nr, token_kind.name(), token.token_kind.name() });
             return ParseError.SyntaxError;
         }
@@ -261,7 +261,7 @@ pub const Parser = struct {
                 // container blocks can contain blank lines so we don't close them here
                 if (self.open_block_idx > 0) {
                     if (self.peek_next_token().token_kind == TokenKind.Newline) {
-                        std.debug.print("ln:{}: Close block (all): {}\n",
+                        std.debug.print("ln:{}: Close block (all): {s}\n",
                             .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
                         // close ALL open blocks
                         self.open_block_idx = 0;
@@ -269,7 +269,7 @@ pub const Parser = struct {
                         self.eat_token();  // eat both \n
                     } else {
                         if (!ast.is_container_block(self.get_last_block().data)) {
-                            std.debug.print("ln:{}: Close block: {}\n",
+                            std.debug.print("ln:{}: Close block: {s}\n",
                                 .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
                             self.close_last_block();
                         }
@@ -331,7 +331,7 @@ pub const Parser = struct {
                         },
                         else => {
                             Parser.report_error(
-                                "ln:{}: Unclosed block of type '{}' prevented closing a blockquote!\n",
+                                "ln:{}: Unclosed block of type '{s}' prevented closing a blockquote!\n",
                                 .{ self.peek_token().line_nr - 1, @tagName(self.get_last_block().data) });
                             return ParseError.SyntaxError;
                         },
@@ -469,7 +469,7 @@ pub const Parser = struct {
                         catch {
                             Parser.report_error(
                                 "ln:{}: Numbers that start an ordered list need to be in base 10, " ++
-                                "number was '{}'\n",
+                                "number was '{s}'\n",
                                 .{ start_token.line_nr, start_token.text(self.tokenizer.bytes) });
                             return ParseError.SyntaxError;
                         };
@@ -531,7 +531,7 @@ pub const Parser = struct {
                     }
                 }
 
-                std.debug.print("Found code block ln{}: lang_name {}\n",
+                std.debug.print("Found code block ln{}: lang_name {s}\n",
                     .{ self.peek_token().line_nr, @tagName(code_node.data.FencedCode.language) });
 
                 try self.parse_code_block();
@@ -564,7 +564,7 @@ pub const Parser = struct {
                 };
                 self.eat_token();  // eat closing $$
 
-                std.debug.print("ln:{}: Math env: $${}$$\n",
+                std.debug.print("ln:{}: Math env: $${s}$$\n",
                     .{ math_start.line_nr, math_node.data.MathMultiline.text });
             },
 
@@ -575,7 +575,7 @@ pub const Parser = struct {
                 if (self.open_block_idx > 0) {
                     Parser.report_error(
                         "ln:{}: References must be defined at the document level! " ++
-                        "Definition found in '{}' instead.\n",
+                        "Definition found in '{s}' instead.\n",
                         .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
                     return ParseError.SyntaxError;
                 }
@@ -604,7 +604,7 @@ pub const Parser = struct {
                     return ParseError.SyntaxError;
                 }
                 std.debug.print(
-                    "ln:{}: Ref with label: '{}'\n",
+                    "ln:{}: Ref with label: '{s}'\n",
                     .{ self.peek_token().line_nr, self.tokenizer.bytes[ref_name_start..ref_name_end] });
 
                 try self.require_token(
@@ -633,7 +633,7 @@ pub const Parser = struct {
                     return ParseError.SyntaxError;
                 } else {
                     // actually write entry value (key was already written by getOrPut)
-                    entry_found.entry.*.value = &reference_def.data.LinkRef;
+                    entry_found.value_ptr.* = &reference_def.data.LinkRef;
                 }
 
                 try self.parse_link_destination();
@@ -679,7 +679,7 @@ pub const Parser = struct {
                     else => {
                         Parser.report_error(
                             "ln:{}: Expected image label '[' or image destination '(' starter, " ++
-                            "got '{}' instead!\n",
+                            "got '{s}' instead!\n",
                             .{ self.peek_token().line_nr, self.peek_token().token_kind.name() });
                         return ParseError.SyntaxError;
                     },
@@ -744,7 +744,7 @@ pub const Parser = struct {
         if (!ast.is_inline(new_block)) {
             if (ast.is_inline(last_block_kind)) {
                 Parser.report_error(
-                    "ln:{}: There was at least one unclosed inline element of type '{}'\n",
+                    "ln:{}: There was at least one unclosed inline element of type '{s}'\n",
                     .{ self.peek_token().line_nr, @tagName(last_block_kind) });
                 return ParseError.SyntaxError;
             }
@@ -797,7 +797,7 @@ pub const Parser = struct {
         if (!(new_block == .Paragraph and last_block_kind == .Paragraph) and
                 !ast.can_hold(last_block_kind, new_block)) {
             Parser.report_error(
-                "ln:{}: Previous block of type '{}' can't hold new block of type '{}'\n",
+                "ln:{}: Previous block of type '{s}' can't hold new block of type '{s}'\n",
                 .{ self.peek_token().line_nr, @tagName(last_block_kind), new_block });
             return ParseError.SyntaxError;
         }
@@ -962,7 +962,7 @@ pub const Parser = struct {
         // -> check last block and contiue paragraph if we can
         const last_leaf_block = self.get_last_leaf_block();
         if (last_leaf_block != null)
-            std.debug.print("ln:{}: Last leaf block {}\n",
+            std.debug.print("ln:{}: Last leaf block {s}\n",
                 .{ self.peek_token().line_nr,  @tagName(last_leaf_block.?.data) });
         if (last_leaf_block == null or last_leaf_block.?.data != NodeKind.Paragraph) {
             var paragraph = try self.new_node(self.get_last_block());
@@ -994,7 +994,7 @@ pub const Parser = struct {
     fn close_paragraph(self: *Parser) ParseError!void {
         if (self.get_last_block().data != NodeKind.Paragraph) {
             Parser.report_error(
-                "ln:{}: There was at least one unclosed inline element of type '{}'\n",
+                "ln:{}: There was at least one unclosed inline element of type '{s}'\n",
                 .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
             return ParseError.SyntaxError;
         }
@@ -1217,7 +1217,7 @@ pub const Parser = struct {
                 };
                 self.eat_token();  // eat closing $
 
-                std.debug.print("ln:{}: Math span: `{}`\n",
+                std.debug.print("ln:{}: Math span: `{s}`\n",
                     .{ inline_math_start.line_nr, math_node.data.MathInline.text });
             },
             TokenKind.Open_bracket => {
@@ -1241,8 +1241,8 @@ pub const Parser = struct {
             // up making the text buffer too narrow
             continue_text.data.Text.text.len += token.end - token.start;
             // const tok_text = if (token.token_kind != TokenKind.Decrease_indent) token.text(self.tokenizer.bytes) else token.token_kind.name();
-            // std.debug.print("Tok kind {} text: {}\n", .{ token.token_kind,  tok_text });
-            // std.debug.print("ln:{}: Enlarged text node: {}\n",
+            // std.debug.print("Tok kind {} text: {s}\n", .{ token.token_kind,  tok_text });
+            // std.debug.print("ln:{}: Enlarged text node: {s}\n",
             //     .{ token.line_nr, continue_text.data.Text.text });
         } else {
             var text_node = try self.new_node(parent);
@@ -1251,7 +1251,7 @@ pub const Parser = struct {
             };
             self.last_text_node = text_node;
 
-            // std.debug.print("Text node content: '''{}'''\n", .{ text_node.data.Text.text });
+            // std.debug.print("Text node content: '''{s}'''\n", .{ text_node.data.Text.text });
         }
         self.eat_token();
 
@@ -1285,7 +1285,7 @@ pub const Parser = struct {
                 const last_block = self.get_last_block();
                 if (last_block.data != NodeKind.Link) {
                     Parser.report_error(
-                        "ln:{}: Unclosed {} in Link text (first [] of a link definition)\n",
+                        "ln:{}: Unclosed {s} in Link text (first [] of a link definition)\n",
                         .{ self.peek_token().line_nr, @tagName(last_block.data) });
                     return ParseError.SyntaxError;
                 }
@@ -1331,7 +1331,7 @@ pub const Parser = struct {
                 break;
             } else if (token.token_kind == TokenKind.Eof) {
                 Parser.report_error(
-                    "ln:{}: Encountered end-of-file inside {} label brackets\n",
+                    "ln:{}: Encountered end-of-file inside {s} label brackets\n",
                     .{ token.line_nr, @tagName(kind) });
                 return ParseError.SyntaxError;
             }
@@ -1429,7 +1429,7 @@ pub const Parser = struct {
         }
 
         const link_or_ref = self.get_last_block();
-        std.debug.print("ln:{}: Parse destination -> Link or ref: {}\n",
+        std.debug.print("ln:{}: Parse destination -> Link or ref: {s}\n",
             .{ self.peek_token().line_nr , @tagName(self.get_last_block().data) });
         if (ended_on_link_title) {
             self.eat_token();  // eat "
@@ -1509,7 +1509,7 @@ pub const Parser = struct {
             };
         } else {
             Parser.report_error(
-                "ln:{}: Unrecognized builtin: '{}'\n",
+                "ln:{}: Unrecognized builtin: '{s}'\n",
                 .{ start_token.line_nr, keyword });
             return ParseError.SyntaxError;
         }
@@ -1563,7 +1563,7 @@ pub const Parser = struct {
                                     .Space, .Tab => {},
                                     else => {
                                         Parser.report_error(
-                                            "ln:{}: Hit '{}' while waiting for param delimiter ','" ++
+                                            "ln:{}: Hit '{s}' while waiting for param delimiter ','" ++
                                             " or call closer ')' when parsing a builtin call!\n",
                                             .{ start_token.line_nr, tok.token_kind.name() });
                                         return ParseError.SyntaxError;
@@ -1597,7 +1597,7 @@ pub const Parser = struct {
                                     .Space, .Tab => {},
                                     else => {
                                         Parser.report_error(
-                                            "ln:{}: Hit '{}' while waiting for param delimiter ','" ++
+                                            "ln:{}: Hit '{s}' while waiting for param delimiter ','" ++
                                             " or call closer ')' when parsing a builtin call!\n",
                                             .{ start_token.line_nr, tok.token_kind.name() });
                                         return ParseError.SyntaxError;
@@ -1631,7 +1631,7 @@ pub const Parser = struct {
                         },
                         .Comma => {
                             std.debug.print(
-                                "ln:{}: Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
+                                "ln:{}: Finished arg: {s}\n", .{ start_token.line_nr, current_arg.data });
                             current_arg.print_direct_children();
 
                             state = .next_pos_param;
@@ -1673,7 +1673,7 @@ pub const Parser = struct {
                         },
                         else => {
                             Parser.report_error(
-                                "ln:{}: Expected keyword got {}!\n",
+                                "ln:{}: Expected keyword got {s}!\n",
                                 .{ start_token.line_nr, tok.token_kind.name() });
                             return ParseError.SyntaxError;
                         },
@@ -1708,7 +1708,7 @@ pub const Parser = struct {
                         },
                         else => {
                             Parser.report_error(
-                                "ln:{}: Expected '=' got {}!\n",
+                                "ln:{}: Expected '=' got {s}!\n",
                                 .{ start_token.line_nr, tok.token_kind.name() });
                             return ParseError.SyntaxError;
                         },
@@ -1776,19 +1776,19 @@ pub const Parser = struct {
         self.eat_token();  // eat )
 
         std.debug.print(
-            "ln:{}: Finished builtin: {} pos: {}, kw: {}\n",
+            "ln:{}: Finished builtin: {s} pos: {}, kw: {}\n",
             .{ start_token.line_nr, self.tokenizer.bytes[start_token.start..start_token.end],
                pos_params, kw_params });
 
         const bc_info = builtin_call_info[@enumToInt(mb_builtin_type.?)];
         if (bc_info.pos_params >= 0 and pos_params != bc_info.pos_params) {
             Parser.report_error(
-                "ln:{}: Expected {} positional arguments, found {} for builtin '{}'\n",
+                "ln:{}: Expected {} positional arguments, found {} for builtin '{s}'\n",
                 .{ start_token.line_nr, bc_info.pos_params, pos_params, keyword });
             return ParseError.SyntaxError;
         } else if (kw_params > bc_info.kw_params) {
             Parser.report_error(
-                "ln:{}: Expected a maximum of {} keyword arguments, found {} for builtin '{}'\n",
+                "ln:{}: Expected a maximum of {} keyword arguments, found {} for builtin '{s}'\n",
                 .{ start_token.line_nr, bc_info.kw_params, kw_params, keyword });
             return ParseError.SyntaxError;
         }

@@ -63,18 +63,18 @@ pub fn nodes_from_citeproc_json(
 
     var bib_nodes = std.ArrayList(*Node).init(allocator);
 
-    const citations = &json_tree.root.Object.getEntry("citations").?.value;
+    const citations = &json_tree.root.Object.getEntry("citations").?.value_ptr.*;
     std.debug.assert(citations.Array.items.len == cite_nodes.len);
     for (citations.Array.items) |citation, i| {
         try nodes_from_formatted(allocator, citation.Array.items, cite_nodes[i]);
     }
 
-    const bibliography = &json_tree.root.Object.getEntry("bibliography").?.value;
+    const bibliography = &json_tree.root.Object.getEntry("bibliography").?.value_ptr.*;
     for (bibliography.Array.items) |bib_entry| {
         const entry_node = try Node.create(allocator);
         // NOTE: only passing string ids to citeproc so we can only expect string ids back
         const entry_id = try allocator.dupe(u8, bib_entry.Array.items[0].String);
-        // std.debug.print("BIB ENTRY ID: {}\n", .{ entry_id });
+        // std.debug.print("BIB ENTRY ID: {s}\n", .{ entry_id });
         entry_node.data = .{
             .BibEntry = .{ .id = entry_id },
         };
@@ -165,7 +165,7 @@ fn nodes_from_formatted(
                     };
                     parent.append_child(txt_node);
                     
-                    // std.debug.print("{}", .{ str });
+                    // std.debug.print("{s}", .{ str });
                 }
             },
             else => unreachable,
@@ -248,10 +248,10 @@ pub fn run_citeproc(allocator: *std.mem.Allocator, cite_nodes: []*Node) ![]*Node
     // responding, cmd.exe works fine as does running it in a debugger
     const stdout = try runner.stdout.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
     defer allocator.free(stdout);
-    // std.debug.print("Done reading from citeproc stdout!\nOUT:\n{}\n", .{ stdout });
+    // std.debug.print("Done reading from citeproc stdout!\nOUT:\n{s}\n", .{ stdout });
     const stderr = try runner.stderr.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
     defer allocator.free(stderr);
-    std.debug.print("Done reading from citeproc stderr!\nERR:\n{}\n", .{ stderr });
+    std.debug.print("Done reading from citeproc stderr!\nERR:\n{s}\n", .{ stderr });
 
     _ = try runner.wait();
 

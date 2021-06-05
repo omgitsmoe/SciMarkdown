@@ -54,7 +54,7 @@ pub fn mainArgs(allocator: *std.mem.Allocator, args: []const []const u8) !void {
 
     var html_gen = HTMLGenerator.init(allocator, parser.current_document, parser.label_ref_map);
     const html_out = try html_gen.generate();
-    // std.debug.print("{}\n", .{ html_out });
+    // std.debug.print("{s}\n", .{ html_out });
 
     const file = try std.fs.cwd().createFile(
         "test.html",

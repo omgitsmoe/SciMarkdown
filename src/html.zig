@@ -237,7 +237,7 @@ pub const HTMLGenerator = struct {
                             link_title = ref.title;
                         } else {
                             HTMLGenerator.report_error(
-                                "No reference definition could be found for label '{}'!\n",
+                                "No reference definition could be found for label '{s}'!\n",
                                 .{ link.label.? });
                             return Error.ReferenceLabelNotFound;
                         }

@@ -154,7 +154,7 @@ pub const CodeRunner = struct {
         }
 
         std.debug.print(
-            "Lang: {} Code generated: \n{}\n---\n", .{ @tagName(self.lang), self.merged_code.items });
+            "Lang: {s} Code generated: \n{s}\n---\n", .{ @tagName(self.lang), self.merged_code.items });
     }
 
     pub fn run(self: *CodeRunner) !void {
@@ -225,7 +225,7 @@ pub const CodeRunner = struct {
             var chunk_out: ?[]const u8 = null;
             if (chunk_out_len > 0) {
                 chunk_out = bytes[i+4..i+4+chunk_out_len];
-                std.debug.print("\nOUT:\n'''{}'''\n----------\n", .{ chunk_out });
+                std.debug.print("\nOUT:\n'''{s}'''\n----------\n", .{ chunk_out });
             }
             i += 4 + chunk_out_len;
 
@@ -253,7 +253,7 @@ pub const CodeRunner = struct {
             var chunk_out: ?[]const u8 = null;
             if (chunk_out_len > 0) {
                 chunk_out = bytes[i..i + chunk_out_len];
-                std.debug.print("\nOUT:\n'''{}'''\n----------\n", .{ chunk_out });
+                std.debug.print("\nOUT:\n'''{s}'''\n----------\n", .{ chunk_out });
             }
             i += chunk_out_len;
 

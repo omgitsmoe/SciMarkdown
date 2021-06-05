@@ -186,10 +186,10 @@ pub const BibParser = struct {
         // convert to lower-case to match with enum tagNames
         const lowercased = try std.ascii.allocLowerString(
             self.allocator, self.bytes[entry_type_start..self.idx]);
-        // std.debug.print("Lowercased type: {}\n", .{ lowercased });
+        // std.debug.print("Lowercased type: {s}\n", .{ lowercased });
         const entry_type = std.meta.stringToEnum(
             EntryType, lowercased) orelse {
-                BibParser.report_error("'{}' is not a valid entry type!\n",
+                BibParser.report_error("'{s}' is not a valid entry type!\n",
                                        .{ self.bytes[entry_type_start..self.idx] });
                 return Error.SyntaxError;
         };
@@ -221,7 +221,7 @@ pub const BibParser = struct {
         // ^ result will be a struct with a pointer to the HashMap.Entry and a bool
         // whether an existing value was found
         if (entry_found.found_existing) {
-            BibParser.report_error("Duplicate label '{}'!\n", .{ label });
+            BibParser.report_error("Duplicate label '{s}'!\n", .{ label });
             return Error.DuplicateLabel;
         } else {
             // actually write entry value (key was already written by getOrPut)
@@ -246,7 +246,7 @@ pub const BibParser = struct {
             }
         }
 
-        // std.debug.print("Finished entry of type '{}' with label '{}'!\n",
+        // std.debug.print("Finished entry of type '{}' with label '{s}'!\n",
         //                 .{ entry_type, label });
     }
 
@@ -322,7 +322,7 @@ pub const BibParser = struct {
             try self.advance_to_next_byte();
         }
         
-        // std.debug.print("Field -> {}: {}\n",
+        // std.debug.print("Field -> {s}: {s}\n",
         //     .{ self.bytes[field_name_start..field_name_end], field_value_str.items });
 
         const field_type = field_name.get_field_type();
@@ -364,7 +364,7 @@ pub const BibParser = struct {
 
         // std.debug.print("Split list into:\n", .{});
         // for (split_items.items) |it| {
-        //     std.debug.print("    {}\n", .{ it });
+        //     std.debug.print("    {s}\n", .{ it });
         // }
         return split_items.toOwnedSlice();
         // return &[_][]const u8 { "test", "other" };
