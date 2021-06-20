@@ -2,11 +2,11 @@
 *.pdf
 *.zip
 zig-cache/
+zig-out/
 research/
 *.exe
 *.pdb
 .vs/
-zig-cache/
 build/
 _compiler_tests/
 tags

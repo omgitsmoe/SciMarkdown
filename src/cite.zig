@@ -48,13 +48,13 @@ pub const Format = enum {
 pub fn nodes_from_citeproc_json(
     allocator: *std.mem.Allocator,
     json: []const u8,
-    cite_nodes: []*Node  // TODO NodeKind.Citation nodes in the same order as citations were passed to citeproc
+    cite_nodes: []*Node, // TODO NodeKind.Citation nodes in the same order as citations were passed to citeproc
 ) ![]*Node {
     // NOTE: either use the Parser and keep the ValueTree and generate formatted
     // strings from that directly or use json.TokenStream to generate
     // CiteprocResult from that 'manually'
     var stream = std.json.Parser.init(allocator, false);
-    defer stream.deinit();  // deallocates node/values stack
+    defer stream.deinit(); // deallocates node/values stack
     var json_tree = try stream.parse(json);
     // json_tree.arena holds allocated Arrays/ObjectMaps/Strings
     // no Strings allocated since we passed false as copy_strings
@@ -80,19 +80,14 @@ pub fn nodes_from_citeproc_json(
         };
         try bib_nodes.append(entry_node);
 
-        try nodes_from_formatted(
-            allocator, bib_entry.Array.items[1].Array.items, entry_node);
+        try nodes_from_formatted(allocator, bib_entry.Array.items[1].Array.items, entry_node);
     }
 
     return bib_nodes.toOwnedSlice();
 }
 
 /// adds formatted ast.Nodes to first_parent from a Citeproc formatted string in json
-fn nodes_from_formatted(
-    allocator: *std.mem.Allocator,
-    formatted_items: []const std.json.Value,
-    first_parent: *Node
-) !void {
+fn nodes_from_formatted(allocator: *std.mem.Allocator, formatted_items: []const std.json.Value, first_parent: *Node) !void {
 
     // TODO instead of chaning the BuiltinCall node to Citation
     // use Citation node for a single "CitationItem" in the sense of csl/citeproc
@@ -125,9 +120,8 @@ fn nodes_from_formatted(
                     },
                     .bold => {
                         parent = try Node.create(allocator);
-                        parent.data = .{ 
-                            .StrongEmphasis = 
-                                .{ .opener_token_kind = TokenKind.Asterisk_double },
+                        parent.data = .{
+                            .StrongEmphasis = .{ .opener_token_kind = TokenKind.Asterisk_double },
                         };
                         first_parent.append_child(parent);
                     },
@@ -151,9 +145,12 @@ fn nodes_from_formatted(
                         parent.data = .Underline;
                         first_parent.append_child(parent);
                     },
-                    .baseline,  // TODO what is this?
-                    .@"no-italics", .@"no-bold",
-                    .@"no-decoration", .@"no-small-caps" => parent = first_parent,
+                    .baseline, // TODO what is this?
+                    .@"no-italics",
+                    .@"no-bold",
+                    .@"no-decoration",
+                    .@"no-small-caps",
+                    => parent = first_parent,
                     .div => unreachable,
                 }
 
@@ -164,7 +161,7 @@ fn nodes_from_formatted(
                         .Text = .{ .text = try allocator.dupe(u8, str.String) },
                     };
                     parent.append_child(txt_node);
-                    
+
                     // std.debug.print("{s}", .{ str });
                 }
             },
@@ -178,7 +175,12 @@ fn nodes_from_formatted(
 /// potential @MemoryLeak if no ArenaAllocator or sth similar is used
 /// since the caller takes ownership of stdout and stderr that are
 /// currently not passed TODO
-pub fn run_citeproc(allocator: *std.mem.Allocator, cite_nodes: []*Node) ![]*Node {
+pub fn run_citeproc(
+    allocator: *std.mem.Allocator,
+    cite_nodes: []*Node,
+    reference_file: []const u8,
+    csl_file: []const u8
+) ![]*Node {
     // jgm/citeproc states that it takes either an array of Citation{} objects (json)
     // or an array of CitationItem arrays
     // but if the first option is passed it errors:
@@ -220,11 +222,13 @@ pub fn run_citeproc(allocator: *std.mem.Allocator, cite_nodes: []*Node) ![]*Node
         .lang = "de-DE",
     };
 
+    // var cmds = std.ArrayList([]const u8).init(allocator);
     const cmd = &[_][]const u8{
-        "vendor\\citeproc.exe", "--references=bib.json",
-        "--style=vendor\\apa-6th-edition.csl",
-        "--format=json",
+        "citeproc.exe", "--format=json",
+        "--references", reference_file,
+        "--style", csl_file,
     };
+    std.debug.print("Cit commands: {any}\n", .{ cmd });
     var runner = try std.ChildProcess.init(cmd, allocator);
     defer runner.deinit();
     runner.stdin_behavior = .Pipe;
@@ -251,7 +255,7 @@ pub fn run_citeproc(allocator: *std.mem.Allocator, cite_nodes: []*Node) ![]*Node
     // std.debug.print("Done reading from citeproc stdout!\nOUT:\n{s}\n", .{ stdout });
     const stderr = try runner.stderr.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
     defer allocator.free(stderr);
-    std.debug.print("Done reading from citeproc stderr!\nERR:\n{s}\n", .{ stderr });
+    std.debug.print("Done reading from citeproc stderr!\nERR:\n{s}\n", .{stderr});
 
     _ = try runner.wait();
 
