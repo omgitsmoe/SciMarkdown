@@ -263,8 +263,15 @@ pub const Parser = struct {
                     if (self.peek_next_token().token_kind == TokenKind.Newline) {
                         std.debug.print("ln:{}: Close block (all): {s}\n",
                             .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
-                        // close ALL open blocks
-                        self.open_block_idx = 0;
+                        // close ALL open blocks except blockquote
+                        var idx = self.open_block_idx;
+                        while (idx > 0) : (idx -= 1) {
+                            if (self.open_blocks[idx].data == .BlockQuote) {
+                                break;
+                            }
+                        }
+                        self.open_block_idx = idx;
+                        
                         self.eat_token();
                         self.eat_token();  // eat both \n
                     } else {
@@ -730,13 +737,55 @@ pub const Parser = struct {
         }
     }
 
+    /// closes lists that don't match the current token's ident level
+    /// (token.column == list.indent + (2 unordered | 3 ordered))
+    fn close_lists_not_matching_indent(
+        self: *Parser,
+        initial_last_container: Node.NodeData,
+        starter_column: u32,
+        initial_prev_line_blank: bool
+    ) void {
+        var last_container: Node.NodeData = initial_last_container;
+        var prev_line_blank = initial_prev_line_blank;
+
+        // close __all__ lists that don't match our indent!
+        // (col __after__ list item starter + space)
+        while (true) {
+            switch (last_container) {
+                .UnorderedListItem => |item| {
+                    if (item.indent + 2 != starter_column) {
+                        self.close_blocks_until_kind(.UnorderedListItem, false);
+                        self.close_list(prev_line_blank);
+                        // prev_line_blank gets "used up" by the first list
+                        prev_line_blank = false;
+                    } else {
+                        break;
+                    }
+                },
+                .OrderedListItem => |item| {
+                    if (item.indent + 3 != starter_column) {
+                        self.close_blocks_until_kind(.OrderedListItem, false);
+                        self.close_list(prev_line_blank);
+                        // prev_line_blank gets "used up" by the first list
+                        prev_line_blank = false;
+                    } else {
+                        break;
+                    }
+                },
+                else => break,
+            }
+
+            last_container = self.get_last_block().data;
+        }
+    }
+
     fn handle_open_blocks(
         self: *Parser,
         comptime new_block: NodeKind,
         starter_column: u32,  // column of the token that starts the block
         initial_prev_line_blank: bool
     ) ParseError!void {
-        var prev_line_blank = initial_prev_line_blank;
+        std.debug.assert(new_block != .Paragraph);
 
         var last_block_kind: NodeKind = self.get_last_block().data;
         // there should be no remaining open inline elements
@@ -750,55 +799,22 @@ pub const Parser = struct {
             }
         }
 
-        if (new_block != .Paragraph and last_block_kind == NodeKind.Paragraph) {
+        if (last_block_kind == NodeKind.Paragraph) {
             try self.close_paragraph();
             last_block_kind = self.get_last_block().data;
         }
 
         var last_container: Node.NodeData = self.get_last_container_block().data;
         if (last_container != new_block) {
-            // close __all__ lists that don't match our indent!
-            // (col __after__ list item starter + space)
-            while (true) {
-                switch (last_container) {
-                    .UnorderedListItem => |item| {
-                        if (item.indent + 2 != starter_column) {
-                            self.close_blocks_until_kind(.UnorderedListItem, false);
-                            self.close_list(prev_line_blank);
-                            last_block_kind = self.get_last_block().data;
-                            // prev_line_blank gets "used up" by the first list
-                            prev_line_blank = false;
-                        } else {
-                            break;
-                        }
-                    },
-                    .OrderedListItem => |item| {
-                        if (item.indent + 3 != starter_column) {
-                            self.close_blocks_until_kind(.OrderedListItem, false);
-                            self.close_list(prev_line_blank);
-                            last_block_kind = self.get_last_block().data;
-                            // prev_line_blank gets "used up" by the first list
-                            prev_line_blank = false;
-                        } else {
-                            break;
-                        }
-                    },
-                    else => break,
-                }
-
-                last_container = self.get_last_block().data;
-            }
-
+            self.close_lists_not_matching_indent(last_container, starter_column, initial_prev_line_blank);
             last_block_kind = self.get_last_block().data;
         }
 
-        // old/new paragraph -> will be continued
         // otherwise check that old can hold new block kind
-        if (!(new_block == .Paragraph and last_block_kind == .Paragraph) and
-                !ast.can_hold(last_block_kind, new_block)) {
+        if (!ast.can_hold(last_block_kind, new_block)) {
             Parser.report_error(
                 "ln:{}: Previous block of type '{s}' can't hold new block of type '{s}'\n",
-                .{ self.peek_token().line_nr, @tagName(last_block_kind), new_block });
+                .{ self.peek_token().line_nr, @tagName(last_block_kind), @tagName(new_block) });
             return ParseError.SyntaxError;
         }
     }
@@ -830,9 +846,10 @@ pub const Parser = struct {
         prev_line_blank: bool,
         ol_type: u8,
     ) bool {
-        const last_block_data = self.get_last_block().data;
+        const last_block = self.get_last_block();
+        const last_block_kind: NodeKind = last_block.data;
         var list_data: Node.ListItemData = undefined;
-        switch (last_block_data) {
+        switch (last_block.data) {
             .OrderedListItem, .UnorderedListItem => |data| {
                 list_data = data;
             },
@@ -848,24 +865,25 @@ pub const Parser = struct {
         // NOTE: list's loose status should already have been determined
         // before closing the list so we only have to check when we continue
         if (start_column == list_data.indent) {
-            if (last_block_data == new_list) {
+            if (last_block_kind == new_list) {
                 if (list_data.list_item_starter == start_token_kind and list_data.ol_type == ol_type) {
-                    // if (last_block_data == .OrderedListItem and list_data.ol_type != ol_type) {
+                    // if (last_block_kind == .OrderedListItem and list_data.ol_type != ol_type) {
                     //     // same list type, same indent, same 2nd list starter, different ol type
                     //     self.close_list(prev_line_blank);
                     //     return false;
                     // }
                     // same list type, same indent, same list starter
                     self.close_last_block();
+
                     return true;
                 } else {
                     // same list type, same indent, __different__ list starter
                     self.close_list(prev_line_blank);
                     return false;
                 }
-            } else if (last_block_data == other_list_type) {
+            } else if (last_block_kind == other_list_type) {
                 // diff list type, same indent
-                // close previou list
+                // close previous list
                 self.close_list(prev_line_blank);
                 return false;
             }
@@ -955,7 +973,9 @@ pub const Parser = struct {
     }
 
     fn parse_paragraph(self: *Parser, prev_line_blank: bool) ParseError!void {
-        try self.handle_open_blocks(.Paragraph, self.peek_token().column, prev_line_blank);
+        // might have an open list that was not closed by two \n
+        self.close_lists_not_matching_indent(
+            self.get_last_container_block().data, self.peek_token().column, prev_line_blank);
 
         // parse_inline stops on Increase_indent after first list item
         // even though we could continue (unless next line starts another block)

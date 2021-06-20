@@ -106,6 +106,9 @@ This is a normal paragraph %% and this is a comment
 %% lists will continue with just one blank line between them if the list starters (here '-')
 %% are the same! but this will make them loose! each list item text starts a paragraph
 
+- continued list, which is now loose and will have all items rendered inside a paragraph
+
+
 - No indent
   - First indent
     - Second indent
