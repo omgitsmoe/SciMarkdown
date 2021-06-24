@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log;
 
 const tokenizer = @import("tokenizer.zig");
 const TokenKind = tokenizer.TokenKind;
@@ -149,7 +150,7 @@ pub const Node = struct {
         while (dfs.next()) |node_info| {
             if (!node_info.is_end)
                 continue;
-            std.debug.print("Deleting end {}\n", .{ node_info.data.data });
+            log.debug("Deleting end {}\n", .{ node_info.data.data });
             allocator.destroy(node_info.data);
         }
 

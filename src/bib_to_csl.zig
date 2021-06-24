@@ -23,8 +23,6 @@ pub fn bib_to_csl_json(
         const entry = &map_entry.value;
         var csl_type = bib_entry_to_csl_item(entry._type) catch continue;
 
-        // std.debug.print("Bib type: {} CSL type: {}\n", .{ entry._type, csl_type });
-
         var item = csl.Item{
             .@"type" = csl_type,
             .id = .{
@@ -39,7 +37,6 @@ pub fn bib_to_csl_json(
             set_bib_field_on_csl(
                 allocator, field_name, field_entry.value.data,
                 &item.optionals, copy_strings) catch continue;
-            // std.debug.print("Bib field: {} CSL field: {}\n", .{ field_name, csl_property });
         }
 
         try items.append(item);

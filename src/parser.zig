@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log;
 
 const tokenizer = @import("tokenizer.zig");
 const Tokenizer = tokenizer.Tokenizer;
@@ -110,9 +111,6 @@ pub const Parser = struct {
     }
 
     inline fn new_node(self: *Parser, parent: *Node) !*Node {
-        // if (!parent.children_allowed()) {
-        //     std.debug.print("ln:{}: NO CHILDREN: {}\n", .{self.peek_token().line_nr, parent.data});
-        // }
         std.debug.assert(ast.children_allowed(parent.data));
         const node = try Node.create(&self.node_arena.allocator);
         parent.append_child(node);
@@ -235,7 +233,7 @@ pub const Parser = struct {
     }
     
     inline fn report_error(comptime err_msg: []const u8, args: anytype) void {
-        std.log.err(err_msg, args);
+        log.err(err_msg, args);
     }
 
     fn parse_block(self: *Parser, indent_change: i8, prev_line_blank: bool) ParseError!void {
@@ -261,7 +259,7 @@ pub const Parser = struct {
                 // container blocks can contain blank lines so we don't close them here
                 if (self.open_block_idx > 0) {
                     if (self.peek_next_token().token_kind == TokenKind.Newline) {
-                        std.debug.print("ln:{}: Close block (all): {s}\n",
+                        log.debug("ln:{}: Close block (all): {s}\n",
                             .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
                         // close ALL open blocks except blockquote
                         var idx = self.open_block_idx;
@@ -276,7 +274,7 @@ pub const Parser = struct {
                         self.eat_token();  // eat both \n
                     } else {
                         if (!ast.is_container_block(self.get_last_block().data)) {
-                            std.debug.print("ln:{}: Close block: {s}\n",
+                            log.debug("ln:{}: Close block: {s}\n",
                                 .{ self.peek_token().line_nr, @tagName(self.get_last_block().data) });
                             self.close_last_block();
                         }
@@ -382,7 +380,7 @@ pub const Parser = struct {
                     };
                     self.open_block(heading_node);
 
-                    std.debug.print("Heading: level {}\n", .{ heading_node.data.Heading.level });
+                    log.debug("Heading: level {}\n", .{ heading_node.data.Heading.level });
                     try self.parse_inline_until(TokenKind.Newline);
                     self.close_last_block();
                 }
@@ -399,7 +397,7 @@ pub const Parser = struct {
                 self.eat_token();
 
                 const next_token = self.peek_token();
-                std.debug.print("Start {} Next {} 3rd {}\n",
+                log.debug("Start {} Next {} 3rd {}\n",
                     .{ start_token_kind, next_token.token_kind, self.peek_next_token().token_kind });
                 if (next_token.token_kind == TokenKind.Space) {
                     // unordered list (can be started while in a container block)
@@ -435,7 +433,7 @@ pub const Parser = struct {
                         // the arrays
                         // recognizes --- of table sep as invalid thematic break
                         // -> always require table rows to start with |
-                        std.log.err("Line {}: " ++
+                        log.err("Line {}: " ++
                                     "A line with a thematic break (consisting of at least 3 '-'" ++
                                     " can only contain whitespace, comments or the " ++
                                     "character that started the break and has to end in a new line!\n",
@@ -444,7 +442,7 @@ pub const Parser = struct {
                     } else {
                         var thematic_break = try self.new_node(self.get_last_block());
                         thematic_break.data = .ThematicBreak;
-                        std.debug.print("Found valid thematic break! starting with: '{}'\n",
+                        log.debug("Found valid thematic break! starting with: '{}'\n",
                                         .{start_token_kind});
                     }
                 } else {
@@ -538,7 +536,7 @@ pub const Parser = struct {
                     }
                 }
 
-                std.debug.print("Found code block ln{}: lang_name {s}\n",
+                log.debug("Found code block ln{}: lang_name {s}\n",
                     .{ self.peek_token().line_nr, @tagName(code_node.data.FencedCode.language) });
 
                 try self.parse_code_block();
@@ -571,7 +569,7 @@ pub const Parser = struct {
                 };
                 self.eat_token();  // eat closing $$
 
-                std.debug.print("ln:{}: Math env: $${s}$$\n",
+                log.debug("ln:{}: Math env: $${s}$$\n",
                     .{ math_start.line_nr, math_node.data.MathMultiline.text });
             },
 
@@ -610,7 +608,7 @@ pub const Parser = struct {
                     Parser.report_error("ln:{}: Empty reference label!\n", .{ self.peek_token().line_nr });
                     return ParseError.SyntaxError;
                 }
-                std.debug.print(
+                log.debug(
                     "ln:{}: Ref with label: '{s}'\n",
                     .{ self.peek_token().line_nr, self.tokenizer.bytes[ref_name_start..ref_name_end] });
 
@@ -826,7 +824,7 @@ pub const Parser = struct {
             //
             // TODO OrderedList and UnorderedList have the same payload type
             // is there a way to access that without a switch?
-            std.debug.print("ln:{}: One less blank!\n", .{ self.peek_token().line_nr});
+            log.debug("ln:{}: One less blank!\n", .{ self.peek_token().line_nr});
             switch (self.get_last_block().data) {
                 .OrderedList, .UnorderedList => |*list| {
                     list.*.blank_lines -= 1;
@@ -834,7 +832,7 @@ pub const Parser = struct {
                 else => unreachable,
             }
         }
-        std.debug.print("ln:{}: Same blank!\n", .{ self.peek_token().line_nr});
+        log.debug("ln:{}: Same blank!\n", .{ self.peek_token().line_nr});
         self.close_last_block();
     }
 
@@ -982,7 +980,7 @@ pub const Parser = struct {
         // -> check last block and contiue paragraph if we can
         const last_leaf_block = self.get_last_leaf_block();
         if (last_leaf_block != null)
-            std.debug.print("ln:{}: Last leaf block {s}\n",
+            log.debug("ln:{}: Last leaf block {s}\n",
                 .{ self.peek_token().line_nr,  @tagName(last_leaf_block.?.data) });
         if (last_leaf_block == null or last_leaf_block.?.data != NodeKind.Paragraph) {
             var paragraph = try self.new_node(self.get_last_block());
@@ -992,8 +990,7 @@ pub const Parser = struct {
     
         // stops on newline, eof, increase_indent, dedent
         while (try self.parse_inline(true)) {}
-        // std.debug.print("ended on ln:{}: Last block: {}\n",
-        //     .{ self.peek_token().line_nr ,self.get_last_block().data });
+
         switch (self.peek_token().token_kind) {
             .Newline => {
                 self.eat_token();
@@ -1072,7 +1069,7 @@ pub const Parser = struct {
         code_span.data.CodeSpan.code = self.tokenizer.bytes[code_span_start.start..self.peek_token().start];
         self.eat_token();  // eat closing ` or ``
 
-        std.debug.print("ln:{}: Code span {}\n",
+        log.debug("ln:{}: Code span {}\n",
             .{ code_span_start.line_nr, code_span.data });
     }
 
@@ -1113,7 +1110,7 @@ pub const Parser = struct {
                         return ParseError.SyntaxError;
                     }
 
-                    std.debug.print("Close emphasis ln:{}: token: {}\n",
+                    log.debug("Close emphasis ln:{}: token: {}\n",
                                     .{ self.peek_token().line_nr, current_token_kind });
                     self.close_last_block();
                 } else {
@@ -1121,7 +1118,7 @@ pub const Parser = struct {
                     emph_node.data = .{
                         .Emphasis = .{ .opener_token_kind = current_token_kind },
                     };
-                    std.debug.print("Open emphasis ln:{}: token: {} last block: {}\n",
+                    log.debug("Open emphasis ln:{}: token: {} last block: {}\n",
                                     .{ self.peek_token().line_nr, current_token_kind, last_block.data });
                     self.open_block(emph_node);
                 }
@@ -1139,7 +1136,7 @@ pub const Parser = struct {
                         return ParseError.SyntaxError;
                     }
 
-                    std.debug.print("Close strong emphasis ln:{}: token: {}\n",
+                    log.debug("Close strong emphasis ln:{}: token: {}\n",
                                     .{ self.peek_token().line_nr, current_token_kind });
                     self.close_last_block();
                 } else {
@@ -1147,7 +1144,7 @@ pub const Parser = struct {
                     emph_node.data = .{
                         .StrongEmphasis = .{ .opener_token_kind = current_token_kind },
                     };
-                    std.debug.print("Open strong emphasis ln:{}: token: {}\n",
+                    log.debug("Open strong emphasis ln:{}: token: {}\n",
                                     .{ self.peek_token().line_nr, current_token_kind });
                     self.open_block(emph_node);
                 }
@@ -1156,12 +1153,12 @@ pub const Parser = struct {
             TokenKind.Tilde_double => {
                 const last_block = self.get_last_block();
                 if (last_block.data == NodeKind.Strikethrough) {
-                    std.debug.print("ln:{}: Close Strikethrough\n", .{ self.peek_token().line_nr });
+                    log.debug("ln:{}: Close Strikethrough\n", .{ self.peek_token().line_nr });
                     self.close_last_block();
                 } else {
                     var strike_node = try self.new_node(self.get_last_block());
                     strike_node.data = .Strikethrough;
-                    std.debug.print("ln:{}: Open strikethrough\n", .{ self.peek_token().line_nr });
+                    log.debug("ln:{}: Open strikethrough\n", .{ self.peek_token().line_nr });
                     self.open_block(strike_node);
                 }
                 self.eat_token();
@@ -1172,12 +1169,12 @@ pub const Parser = struct {
                 // do this as well? or just make ppl escape the ^/~ instead of spaces inside?
                 const last_block = self.get_last_block();
                 if (last_block.data == NodeKind.Superscript) {
-                    std.debug.print("ln:{}: Close Superscript\n", .{ self.peek_token().line_nr });
+                    log.debug("ln:{}: Close Superscript\n", .{ self.peek_token().line_nr });
                     self.close_last_block();
                 } else {
                     var superscript_node = try self.new_node(self.get_last_block());
                     superscript_node.data = .Superscript;
-                    std.debug.print("ln:{}: Open superscript\n", .{ self.peek_token().line_nr });
+                    log.debug("ln:{}: Open superscript\n", .{ self.peek_token().line_nr });
                     self.open_block(superscript_node);
                 }
                 self.eat_token();
@@ -1185,12 +1182,12 @@ pub const Parser = struct {
             TokenKind.Tilde => {
                 const last_block = self.get_last_block();
                 if (last_block.data == NodeKind.Subscript) {
-                    std.debug.print("ln:{}: Close Subscript\n", .{ self.peek_token().line_nr });
+                    log.debug("ln:{}: Close Subscript\n", .{ self.peek_token().line_nr });
                     self.close_last_block();
                 } else {
                     var subscript_node = try self.new_node(self.get_last_block());
                     subscript_node.data = .Subscript;
-                    std.debug.print("ln:{}: Open subscript\n", .{ self.peek_token().line_nr });
+                    log.debug("ln:{}: Open subscript\n", .{ self.peek_token().line_nr });
                     self.open_block(subscript_node);
                 }
                 self.eat_token();
@@ -1237,7 +1234,7 @@ pub const Parser = struct {
                 };
                 self.eat_token();  // eat closing $
 
-                std.debug.print("ln:{}: Math span: `{s}`\n",
+                log.debug("ln:{}: Math span: `{s}`\n",
                     .{ inline_math_start.line_nr, math_node.data.MathInline.text });
             },
             TokenKind.Open_bracket => {
@@ -1260,18 +1257,12 @@ pub const Parser = struct {
             // backslash is included but the escaped text isn't and this as a whole ends
             // up making the text buffer too narrow
             continue_text.data.Text.text.len += token.end - token.start;
-            // const tok_text = if (token.token_kind != TokenKind.Decrease_indent) token.text(self.tokenizer.bytes) else token.token_kind.name();
-            // std.debug.print("Tok kind {} text: {s}\n", .{ token.token_kind,  tok_text });
-            // std.debug.print("ln:{}: Enlarged text node: {s}\n",
-            //     .{ token.line_nr, continue_text.data.Text.text });
         } else {
             var text_node = try self.new_node(parent);
             text_node.data = .{
                 .Text = .{ .text =  self.tokenizer.bytes[token.start..token.end] },
             };
             self.last_text_node = text_node;
-
-            // std.debug.print("Text node content: '''{s}'''\n", .{ text_node.data.Text.text });
         }
         self.eat_token();
 
@@ -1282,8 +1273,6 @@ pub const Parser = struct {
         // alternative is to add the newline here instead but that might not be
         // wanted all the time
         if (self.peek_token().token_kind == TokenKind.Newline) {
-            // std.debug.print("ln:{}: Reset last_text_node due to newline\n",
-            //     .{ self.peek_token().line_nr });
             self.last_text_node = null;
         }
     }
@@ -1333,7 +1322,7 @@ pub const Parser = struct {
         }
         self.close_last_block();
 
-        std.debug.print("ln:{}: Link: {}\n", .{ link_text_start_token.line_nr, link_node.data });
+        log.debug("ln:{}: Link: {}\n", .{ link_text_start_token.line_nr, link_node.data });
     }
 
     fn parse_link_ref_label(self: *Parser, comptime kind: NodeKind) ParseError![]const u8 {
@@ -1412,7 +1401,7 @@ pub const Parser = struct {
         code_block.data.FencedCode.code = string_buf.toOwnedSlice();
 
         self.close_last_block();  // close code block
-        std.debug.print("Code block:\n{s}", .{ code_block.data.FencedCode.code });
+        log.debug("Code block:\n{s}", .{ code_block.data.FencedCode.code });
     }
 
     /// when this method is called we're still on the first '('
@@ -1449,7 +1438,7 @@ pub const Parser = struct {
         }
 
         const link_or_ref = self.get_last_block();
-        std.debug.print("ln:{}: Parse destination -> Link or ref: {s}\n",
+        log.debug("ln:{}: Parse destination -> Link or ref: {s}\n",
             .{ self.peek_token().line_nr , @tagName(self.get_last_block().data) });
         if (ended_on_link_title) {
             self.eat_token();  // eat "
@@ -1508,7 +1497,7 @@ pub const Parser = struct {
             }
         }
 
-        std.debug.print("Link dest: {}\n", .{ link_or_ref.data });
+        log.debug("Link dest: {}\n", .{ link_or_ref.data });
     }
 
     fn parse_builtin(self: *Parser, start_token: *const Token, parent: ?*Node) ParseError!void {
@@ -1522,7 +1511,7 @@ pub const Parser = struct {
         // start + 1 since the @ is included
         const keyword = self.tokenizer.bytes[start_token.start + 1..start_token.end];
         const mb_builtin_type = std.meta.stringToEnum(BuiltinCall, keyword);
-        std.debug.print("Type: {}\n", .{ mb_builtin_type });
+        log.debug("Builtin type: {}\n", .{ mb_builtin_type });
         if (mb_builtin_type) |bi_type| {
             builtin.data = .{
                 .BuiltinCall = .{ .builtin_type = bi_type }
@@ -1536,7 +1525,7 @@ pub const Parser = struct {
 
         var current_arg = try self.new_node(builtin);
         current_arg.data = .PostionalArg;
-        std.debug.print("Parsing builtin\n", .{});
+        log.debug("Parsing builtin\n", .{});
 
         const State = enum {
             next_pos_param,
@@ -1650,7 +1639,7 @@ pub const Parser = struct {
                             self.eat_token();
                         },
                         .Comma => {
-                            std.debug.print(
+                            log.debug(
                                 "ln:{}: Finished arg: {s}\n", .{ start_token.line_nr, current_arg.data });
                             current_arg.print_direct_children();
 
@@ -1737,7 +1726,7 @@ pub const Parser = struct {
                 .in_kw_param => {
                     switch (tok.token_kind) {
                         .Comma => {
-                            std.debug.print(
+                            log.debug(
                                 "ln:{}: Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
                             current_arg.print_direct_children();
 
@@ -1788,14 +1777,14 @@ pub const Parser = struct {
                     .in_kw_param => kw_params += 1,
                     else => {},
                 }
-                std.debug.print("ln:{}: LAST Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
+                log.debug("ln:{}: LAST Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
                 current_arg.print_direct_children();
             },
         }
 
         self.eat_token();  // eat )
 
-        std.debug.print(
+        log.debug(
             "ln:{}: Finished builtin: {s} pos: {}, kw: {}\n",
             .{ start_token.line_nr, self.tokenizer.bytes[start_token.start..start_token.end],
                pos_params, kw_params });

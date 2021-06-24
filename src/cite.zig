@@ -1,4 +1,6 @@
 const std = @import("std");
+const log = std.log;
+
 const utils = @import("utils.zig");
 const ast = @import("ast.zig");
 const NodeKind = ast.NodeKind;
@@ -74,7 +76,6 @@ pub fn nodes_from_citeproc_json(
         const entry_node = try Node.create(allocator);
         // NOTE: only passing string ids to citeproc so we can only expect string ids back
         const entry_id = try allocator.dupe(u8, bib_entry.Array.items[0].String);
-        // std.debug.print("BIB ENTRY ID: {s}\n", .{ entry_id });
         entry_node.data = .{
             .BibEntry = .{ .id = entry_id },
         };
@@ -87,7 +88,11 @@ pub fn nodes_from_citeproc_json(
 }
 
 /// adds formatted ast.Nodes to first_parent from a Citeproc formatted string in json
-fn nodes_from_formatted(allocator: *std.mem.Allocator, formatted_items: []const std.json.Value, first_parent: *Node) !void {
+fn nodes_from_formatted(
+    allocator: *std.mem.Allocator,
+    formatted_items: []const std.json.Value,
+    first_parent: *Node
+) !void {
 
     // TODO instead of chaning the BuiltinCall node to Citation
     // use Citation node for a single "CitationItem" in the sense of csl/citeproc
@@ -108,7 +113,6 @@ fn nodes_from_formatted(allocator: *std.mem.Allocator, formatted_items: []const 
             },
             .Object => |obj| {
                 const format = std.meta.stringToEnum(Format, obj.get("format").?.String).?;
-                // std.debug.print("{} -> ", .{ format });
                 var parent: *Node = undefined;
                 switch (format) {
                     .italics => {
@@ -161,13 +165,10 @@ fn nodes_from_formatted(allocator: *std.mem.Allocator, formatted_items: []const 
                         .Text = .{ .text = try allocator.dupe(u8, str.String) },
                     };
                     parent.append_child(txt_node);
-
-                    // std.debug.print("{s}", .{ str });
                 }
             },
             else => unreachable,
         }
-        // std.debug.print("\n", .{});
     }
 }
 
@@ -230,11 +231,12 @@ pub fn run_citeproc(
         "--references", reference_file,
         "--style", csl_file,
     };
-    std.debug.print("Cit commands: ", .{});
+
+    log.debug("Cit commands: ", .{});
     for (cmd) |c| {
-        std.debug.print("{s} ", .{ c });
+        log.debug("{s} ", .{ c });
     }
-    std.debug.print("\n", .{});
+    log.debug("\n", .{});
 
     var runner = try std.ChildProcess.init(cmd, allocator);
     defer runner.deinit();
@@ -252,17 +254,18 @@ pub fn run_citeproc(
     // and hits unreachable code
     runner.stdin = null;
 
-    std.debug.print("Done writing to stdin!\n", .{});
+    log.debug("Done writing to stdin!\n", .{});
 
     // might deadlock due to https://github.com/ziglang/zig/issues/6343
     // weirdly only WindowsTerminal seems to have a problem with it and stops
     // responding, cmd.exe works fine as does running it in a debugger
     const stdout = try runner.stdout.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
     defer allocator.free(stdout);
-    // std.debug.print("Done reading from citeproc stdout!\nOUT:\n{s}\n", .{ stdout });
+
+    log.debug("Done reading from citeproc stdout!\nOUT:\n{s}\n", .{ stdout });
     const stderr = try runner.stderr.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
     defer allocator.free(stderr);
-    std.debug.print("Done reading from citeproc stderr!\nERR:\n{s}\n", .{stderr});
+    log.debug("Done reading from citeproc stderr!\nERR:\n{s}\n", .{stderr});
 
     _ = try runner.wait();
 

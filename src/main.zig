@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log;
 const builtin = @import("builtin");
 
 const Parser = @import("parser.zig").Parser;
@@ -78,11 +79,11 @@ pub fn main() !void {
 
     const pos_args = args.positionals();
     const in_file = pos_args[0];
-    std.debug.print("In file: {s}\n", .{in_file});
+    log.debug("In file: {s}\n", .{in_file});
 
     var out_filename: []const u8 = undefined;
     if (args.option("--out")) |out| {
-        std.debug.print("Out direct: {s}\n", .{out});
+        log.debug("Out direct: {s}\n", .{out});
         out_filename = out;
     } else {
         const base = std.fs.path.basename(in_file);
@@ -96,7 +97,7 @@ pub fn main() !void {
         out_filename = out_buf;
     }
 
-    std.debug.print("Out file: {s}\n", .{out_filename});
+    log.debug("Out file: {s}\n", .{out_filename});
 
     var ref_file: ?[]const u8 = null;
     if (args.option("--references")) |ref_fn| {
@@ -134,7 +135,7 @@ pub fn main() !void {
                 }
             }
         } else {
-            std.log.warn(
+            log.warn(
                 "Both a references file (BibLaTeX or CSL-JSON) as well as CSL file " ++
                 "is needed to process citations!", .{});
         }
@@ -142,7 +143,6 @@ pub fn main() !void {
 
     var html_gen = HTMLGenerator.init(allocator, parser.current_document, parser.label_ref_map);
     const html_out = try html_gen.generate();
-    // std.debug.print("{s}\n", .{ html_out });
 
     var file: std.fs.File = undefined;
     if (std.fs.path.isAbsolute(out_filename)) {

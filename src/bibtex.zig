@@ -2,6 +2,7 @@
 const std = @import("std");
 const utils = @import("utils.zig");
 const expect = std.testing.expect;
+const log = std.log;
 
 pub const BibParser = struct {
     bib: Bibliography,
@@ -31,7 +32,7 @@ pub const BibParser = struct {
     }
 
     inline fn report_error(comptime err_msg: []const u8, args: anytype) void {
-        std.log.err(err_msg, args);
+        log.err(err_msg, args);
     }
 
     // zig stdlib's reader also returns EndOfStream err instead of returning null
@@ -186,7 +187,6 @@ pub const BibParser = struct {
         // convert to lower-case to match with enum tagNames
         const lowercased = try std.ascii.allocLowerString(
             self.allocator, self.bytes[entry_type_start..self.idx]);
-        // std.debug.print("Lowercased type: {s}\n", .{ lowercased });
         const entry_type = std.meta.stringToEnum(
             EntryType, lowercased) orelse {
                 BibParser.report_error("'{s}' is not a valid entry type!\n",
@@ -245,9 +245,6 @@ pub const BibParser = struct {
                 try self.parse_entry_field(&entry_found.entry.value);
             }
         }
-
-        // std.debug.print("Finished entry of type '{}' with label '{s}'!\n",
-        //                 .{ entry_type, label });
     }
 
     /// expects to start on first byte of field name
@@ -362,12 +359,7 @@ pub const BibParser = struct {
             try split_items.append(item);
         }
 
-        // std.debug.print("Split list into:\n", .{});
-        // for (split_items.items) |it| {
-        //     std.debug.print("    {s}\n", .{ it });
-        // }
         return split_items.toOwnedSlice();
-        // return &[_][]const u8 { "test", "other" };
     }
 };
 

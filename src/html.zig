@@ -1,4 +1,5 @@
 const std = @import("std");
+const log = std.log;
 
 const DFS = @import("utils.zig").DepthFirstIterator;
 
@@ -33,7 +34,7 @@ pub const HTMLGenerator = struct {
     }
 
     inline fn report_error(comptime err_msg: []const u8, args: anytype) void {
-        std.log.err(err_msg, args);
+        log.err(err_msg, args);
     }
 
     pub fn generate(self: *HTMLGenerator) Error![]const u8 {
@@ -290,7 +291,7 @@ pub const HTMLGenerator = struct {
                 .HardLineBreak => try self.html_buf.appendSlice("<br/>\n"),
                 .Text => |text| {
                     if (node_info.data.first_child) |fc| {
-                        std.debug.print("Text node has child: {}\n", .{ fc.data });
+                        log.debug("Text node has child: {}\n", .{ fc.data });
                     }
                     try self.html_buf.appendSlice(text.text);
                     try self.html_buf.append('\n');

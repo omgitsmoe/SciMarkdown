@@ -1,6 +1,7 @@
 const std = @import("std");
 const ast = @import("ast.zig");
 const DFS = @import("utils.zig").DepthFirstIterator;
+const log = std.log;
 
 pub const Language = enum {
     Unknown,
@@ -153,7 +154,7 @@ pub const CodeRunner = struct {
             else => {},
         }
 
-        std.debug.print(
+        log.debug(
             "Lang: {s} Code generated: \n{s}\n---\n", .{ @tagName(self.lang), self.merged_code.items });
     }
 
@@ -179,20 +180,20 @@ pub const CodeRunner = struct {
         // and hits unreachable code
         self.runner.stdin = null;
 
-        std.debug.print("Done writing to stdin!\n", .{});
+        log.debug("Done writing to stdin!\n", .{});
 
         // might deadlock due to https://github.com/ziglang/zig/issues/6343
         // weirdly only WindowsTerminal seems to have a problem with it and stops
         // responding, cmd.exe works fine as does running it in a debugger
         const stdout = try self.runner.stdout.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
         errdefer allocator.free(stdout);
-        std.debug.print("Done reading from stdout!\n", .{});
+        log.debug("Done reading from stdout!\n", .{});
         const stderr = try self.runner.stderr.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
         errdefer allocator.free(stderr);
-        std.debug.print("Done reading from stderr!\n", .{});
+        log.debug("Done reading from stderr!\n", .{});
 
         _ = try self.runner.wait();
-        std.debug.print("Done waiting on child!\n", .{});
+        log.debug("Done waiting on code execution child: {s}!\n", .{ @tagName(self.lang) });
 
         switch (self.lang) {
             .R => {
@@ -225,7 +226,7 @@ pub const CodeRunner = struct {
             var chunk_out: ?[]const u8 = null;
             if (chunk_out_len > 0) {
                 chunk_out = bytes[i+4..i+4+chunk_out_len];
-                std.debug.print("\nOUT:\n'''{s}'''\n----------\n", .{ chunk_out });
+                log.debug("\nCHUNK OUT:\n'''{s}'''\n----------\n", .{ chunk_out });
             }
             i += 4 + chunk_out_len;
 
@@ -253,7 +254,7 @@ pub const CodeRunner = struct {
             var chunk_out: ?[]const u8 = null;
             if (chunk_out_len > 0) {
                 chunk_out = bytes[i..i + chunk_out_len];
-                std.debug.print("\nOUT:\n'''{s}'''\n----------\n", .{ chunk_out });
+                log.debug("\nCHUNK OUT:\n'''{s}'''\n----------\n", .{ chunk_out });
             }
             i += chunk_out_len;
 
