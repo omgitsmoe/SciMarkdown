@@ -262,7 +262,8 @@ pub fn run_citeproc(
     const stdout = try runner.stdout.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
     defer allocator.free(stdout);
 
-    log.debug("Done reading from citeproc stdout!\nOUT:\n{s}\n", .{ stdout });
+    log.debug("Done reading from citeproc stdout!\n", .{});
+    // log.debug("OUT:\n{s}\n", .{ stdout });
     const stderr = try runner.stderr.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
     defer allocator.free(stderr);
     log.debug("Done reading from citeproc stderr!\nERR:\n{s}\n", .{stderr});

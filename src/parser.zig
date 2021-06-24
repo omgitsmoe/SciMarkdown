@@ -27,6 +27,8 @@ pub const Parser = struct {
     label_ref_map: std.StringHashMap(*Node.LinkData),
     citations:     std.ArrayList(*Node),
 
+    run_languages: LangSet,
+
     tokenizer: Tokenizer,
     // NOTE: ArrayList: pointers to items are __invalid__ after resizing operations!!
     // so it doesn't make sense to keep a ptr to the current token
@@ -68,6 +70,8 @@ pub const Parser = struct {
         BuiltinCallFailed,
     };
 
+    const LangSet = std.enums.EnumSet(code_chunks.Language);
+
     pub fn init(allocator: *std.mem.Allocator, filename: []const u8) !Parser {
         var parser = Parser{
             .allocator = allocator,
@@ -76,6 +80,8 @@ pub const Parser = struct {
 
             .label_ref_map = std.StringHashMap(*Node.LinkData).init(allocator),
             .citations     = std.ArrayList(*Node).init(allocator),
+
+            .run_languages = LangSet.init(.{}),
 
             .tokenizer = try Tokenizer.init(allocator, filename),
             // TODO allocate a capacity for tokens with ensureCapacity based on filesize
@@ -514,6 +520,8 @@ pub const Parser = struct {
                     },
                 };
                 self.open_block(code_node);
+                // mark language for running it later
+                self.run_languages.insert(code_node.data.FencedCode.language);
 
                 // allow builtin calls immediately after the first newline with each
                 // builtin being separated by exactly one newline
@@ -1048,6 +1056,11 @@ pub const Parser = struct {
         if (lang != .Unknown) {
             self.eat_token();
             self.eat_token();  // eat ' '
+        }
+
+        if (run) {
+            // mark language for running it later
+            self.run_languages.insert(lang);
         }
 
         var ctoken = self.peek_token();

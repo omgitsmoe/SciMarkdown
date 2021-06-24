@@ -108,22 +108,23 @@ pub fn main() !void {
         csl_file = csl_fn;
     }
 
-    // // for (args.options("--string")) |s|
-    // //     std.debug.warn("--string = {s}\n", .{s});
-    // // for (args.positionals()) |pos|
-    // //     std.debug.warn("{s}\n", .{pos});
-
     var parser: Parser = try Parser.init(allocator, in_file);
     defer parser.deinit();
     try parser.parse();
 
-    var code_runner = try CodeRunner.init(allocator, .Python, parser.current_document);
-    defer code_runner.deinit();
-    try code_runner.run();
-
-    var r_code_runner = try CodeRunner.init(allocator, .R, parser.current_document);
-    defer r_code_runner.deinit();
-    try r_code_runner.run();
+    // execute code for found languages
+    var run_lang_iter = parser.run_languages.iterator();
+    var runners = std.ArrayList(CodeRunner).init(allocator);
+    while (run_lang_iter.next()) |lang| {
+        var code_runner = try runners.addOne();
+        code_runner.* = try CodeRunner.init(allocator, lang, parser.current_document);
+        try code_runner.run();
+    }
+    defer {
+        for (runners.items) |*runner| {
+            runner.deinit();
+        }
+    }
 
     if (ref_file != null or csl_file != null) {
         if (ref_file != null and csl_file != null) {
