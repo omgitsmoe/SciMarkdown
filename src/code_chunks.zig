@@ -161,7 +161,7 @@ pub const CodeRunner = struct {
         const allocator = &self.out_buf.allocator;
         const cmd = switch (self.lang) {
             .Python => &[_][]const u8{"python"},
-            .R => &[_][]const u8{"D:\\Programs\\R-4.0.2\\bin\\R.exe", "--save", "--quiet", "--no-echo"},
+            .R => &[_][]const u8{"R", "--save", "--quiet", "--no-echo"},
             else => return,
         };
         self.runner = try std.ChildProcess.init(cmd, allocator);

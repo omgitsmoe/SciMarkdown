@@ -222,13 +222,20 @@ pub fn run_citeproc(
         .lang = "de-DE",
     };
 
-    // var cmds = std.ArrayList([]const u8).init(allocator);
+    // NOTE: excecutable has to be specified without extension otherwise it tries to
+    // find it as executable.exe.exe *.exe.bat etc.
+    // see: https://github.com/ziglang/zig/pull/2705 and https://github.com/ziglang/zig/pull/2770
     const cmd = &[_][]const u8{
-        "citeproc.exe", "--format=json",
+        "citeproc", "--format=json",
         "--references", reference_file,
         "--style", csl_file,
     };
-    std.debug.print("Cit commands: {any}\n", .{ cmd });
+    std.debug.print("Cit commands: ", .{});
+    for (cmd) |c| {
+        std.debug.print("{s} ", .{ c });
+    }
+    std.debug.print("\n", .{});
+
     var runner = try std.ChildProcess.init(cmd, allocator);
     defer runner.deinit();
     runner.stdin_behavior = .Pipe;
@@ -238,8 +245,8 @@ pub fn run_citeproc(
     // order important otherwise stdin etc. not initialized
     try runner.spawn();
 
-    try std.json.stringify(to_citeproc, .{}, runner.stdin.?.writer());
     // write program code to stdin
+    try std.json.stringify(to_citeproc, .{}, runner.stdin.?.writer());
     runner.stdin.?.close();
     // has to be set to null otherwise the ChildProcess tries to close it again
     // and hits unreachable code
