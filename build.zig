@@ -14,10 +14,11 @@ pub fn build(b: *Builder) void {
     const exe = b.addExecutable("pistis", "src/main.zig");
     exe.setTarget(target);
     exe.setBuildMode(mode);
-    exe.addPackage(.{
-        .name = "zig-clap",
-        .path = "deps/zig-clap/clap.zig",
-    });
+    // exe.addPackage(.{
+    //     .name = "zig-clap",
+    //     .path = "deps/zig-clap/clap.zig",
+    // });
+    exe.addPackagePath("zig-clap", "deps/zig-clap/clap.zig");
 
     exe.install();
 

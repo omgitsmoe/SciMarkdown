@@ -217,7 +217,7 @@ pub const BibParser = struct {
         const label = self.bytes[label_start..self.idx];
 
         // make sure we don't have a duplicate label!
-        const entry_found = try self.bib.label_entry_map.getOrPut(label);
+        var entry_found = try self.bib.label_entry_map.getOrPut(label);
         // ^ result will be a struct with a pointer to the HashMap.Entry and a bool
         // whether an existing value was found
         if (entry_found.found_existing) {
@@ -225,7 +225,7 @@ pub const BibParser = struct {
             return Error.DuplicateLabel;
         } else {
             // actually write entry value (key was already written by getOrPut)
-            entry_found.entry.*.value = Entry.init(&self.bib.field_arena.allocator, entry_type);
+            entry_found.value_ptr.* = Entry.init(&self.bib.field_arena.allocator, entry_type);
         }
         try self.advance_to_next_byte();
 
@@ -242,7 +242,7 @@ pub const BibParser = struct {
             } else {
                 // NOTE: label_entry_map can't be modified while the function below is
                 // still running otherwise the entry ptr might? get invalidated
-                try self.parse_entry_field(&entry_found.entry.value);
+                try self.parse_entry_field(entry_found.value_ptr);
             }
         }
     }
@@ -368,7 +368,7 @@ test "split list" {
     var res = try BibParser.split_list(alloc, "A and B and C and others");
     var expected = [_][]const u8 { "A", "B", "C", "others" };
     for (res) |it, i| {
-        expect(std.mem.eql(u8, it, expected[i]));
+        try expect(std.mem.eql(u8, it, expected[i]));
     }
     // otherwise testing allocator complains about memory leak
     alloc.free(res);
@@ -376,7 +376,7 @@ test "split list" {
     res = try BibParser.split_list(alloc, "Hand and von Band, Jr., Test and Stand de Ipsum and others");
     expected = [_][]const u8 { "Hand", "von Band, Jr., Test", "Stand de Ipsum", "others" };
     for (res) |it, i| {
-        expect(std.mem.eql(u8, it, expected[i]));
+        try expect(std.mem.eql(u8, it, expected[i]));
     }
     alloc.free(res);
 }
@@ -404,50 +404,50 @@ test "bibparser" {
     var bib = try bp.parse();
     defer bib.deinit();
 
-    expect(std.mem.eql(u8, bib.path, "/home/test/path"));
+    try expect(std.mem.eql(u8, bib.path, "/home/test/path"));
 
     var entry = bib.label_entry_map.get("Seidel2015").?;
-    expect(entry._type == .article);
+    try expect(entry._type == .article);
 
     const author = entry.fields.get("author").?;
     const author_expected = [_][]const u8 {
         "Dominik Seidel", "Nils Hoffmann", "Martin Ehbrecht", "Julia Juchheim", "Christian Ammer"
     };
     for (author.data.name_list.values) |it, i| {
-        expect(std.mem.eql(u8, it, author_expected[i]));
+        try expect(std.mem.eql(u8, it, author_expected[i]));
     }
 
     var field = entry.fields.get("title").?;
-    expect(std.mem.eql(
+    try expect(std.mem.eql(
             u8, field.data.literal_field.value, "How neighborhood affects tree diameter increment"));
 
     field = entry.fields.get("journal").?;
-    expect(std.mem.eql(
+    try expect(std.mem.eql(
             u8, field.data.literal_field.value, "Forest Ecology and Management"));
 
     field = entry.fields.get("year").?;
-    expect(std.mem.eql(
+    try expect(std.mem.eql(
             u8, field.data.literal_field.value, "2015"));
 
     field = entry.fields.get("volume").?;
-    expect(std.mem.eql(
+    try expect(std.mem.eql(
             u8, field.data.integer_field.value, "336"));
 
     field = entry.fields.get("pages").?;
-    expect(std.mem.eql(
+    try expect(std.mem.eql(
             u8, field.data.range_field.value, "119--128"));
 
     field = entry.fields.get("month").?;
-    expect(std.mem.eql(
+    try expect(std.mem.eql(
             u8, field.data.literal_field.value, "jan"));
 
     field = entry.fields.get("doi").?;
-    expect(std.mem.eql(
+    try expect(std.mem.eql(
             u8, field.data.verbatim_field.value, "10.1016/j.foreco.2014.10.020"));
 
     field = entry.fields.get("publisher").?;
-    expect(field.data.literal_list.values.len == 1);
-    expect(std.mem.eql(u8, field.data.literal_list.values[0], "Elsevier BV"));
+    try expect(field.data.literal_list.values.len == 1);
+    try expect(std.mem.eql(u8, field.data.literal_list.values[0], "Elsevier BV"));
 }
 
 test "bibparser no leak on err" {
@@ -459,7 +459,7 @@ test "bibparser no leak on err" {
 
     var bp = BibParser.init(alloc, "/home/test/path", bibtxt);
     var bib = bp.parse();
-    std.testing.expectError(BibParser.Error.EndOfFile, bib);
+    try std.testing.expectError(BibParser.Error.EndOfFile, bib);
 }
 
 pub const FieldMap = std.StringHashMap(Field);
@@ -707,70 +707,70 @@ inline fn is_single_field_type(field_type: FieldTypeTT) void {
 
 test "parse name simple" {
     var res = try ListField.parse_name("First von Last");
-    expect(std.mem.eql(u8, res.first.?, "First"));
-    expect(std.mem.eql(u8, res.prefix.?, "von"));
-    expect(std.mem.eql(u8, res.last.?, "Last"));
-    expect(res.suffix == null);
+    try expect(std.mem.eql(u8, res.first.?, "First"));
+    try expect(std.mem.eql(u8, res.prefix.?, "von"));
+    try expect(std.mem.eql(u8, res.last.?, "Last"));
+    try expect(res.suffix == null);
 
     res = try ListField.parse_name("First Last");
-    expect(std.mem.eql(u8, res.first.?, "First"));
-    expect(res.prefix == null);
-    expect(std.mem.eql(u8, res.last.?, "Last"));
-    expect(res.suffix == null);
+    try expect(std.mem.eql(u8, res.first.?, "First"));
+    try expect(res.prefix == null);
+    try expect(std.mem.eql(u8, res.last.?, "Last"));
+    try expect(res.suffix == null);
 
     // currently not stripping whitespace in the First Last case
     res = try ListField.parse_name("First    Last  ");
-    expect(std.mem.eql(u8, res.first.?, "First   "));
-    expect(res.prefix == null);
-    expect(std.mem.eql(u8, res.last.?, "Last  "));
-    expect(res.suffix == null);
+    try expect(std.mem.eql(u8, res.first.?, "First   "));
+    try expect(res.prefix == null);
+    try expect(std.mem.eql(u8, res.last.?, "Last  "));
+    try expect(res.suffix == null);
 
     res = try ListField.parse_name("Last-Last");
-    expect(res.first == null);
-    expect(res.prefix == null);
-    expect(std.mem.eql(u8, res.last.?, "Last-Last"));
-    expect(res.suffix == null);
+    try expect(res.first == null);
+    try expect(res.prefix == null);
+    try expect(std.mem.eql(u8, res.last.?, "Last-Last"));
+    try expect(res.suffix == null);
 
     res = try ListField.parse_name("First J. Other von da of Last Last");
-    expect(std.mem.eql(u8, res.first.?, "First J. Other"));
-    expect(std.mem.eql(u8, res.prefix.?, "von da of"));
-    expect(std.mem.eql(u8, res.last.?, "Last Last"));
-    expect(res.suffix == null);
+    try expect(std.mem.eql(u8, res.first.?, "First J. Other"));
+    try expect(std.mem.eql(u8, res.prefix.?, "von da of"));
+    try expect(std.mem.eql(u8, res.last.?, "Last Last"));
+    try expect(res.suffix == null);
 
     // only skipping initial whitespace for now
     // TODO?
     res = try ListField.parse_name("    First von Last");
-    expect(std.mem.eql(u8, res.first.?, "First"));
-    expect(std.mem.eql(u8, res.prefix.?, "von"));
-    expect(std.mem.eql(u8, res.last.?, "Last"));
-    expect(res.suffix == null);
+    try expect(std.mem.eql(u8, res.first.?, "First"));
+    try expect(std.mem.eql(u8, res.prefix.?, "von"));
+    try expect(std.mem.eql(u8, res.last.?, "Last"));
+    try expect(res.suffix == null);
 }
 
 test "parse name commas" {
     var res = try ListField.parse_name("von Last, First");
-    expect(std.mem.eql(u8, res.first.?, "First"));
-    expect(std.mem.eql(u8, res.prefix.?, "von"));
-    expect(std.mem.eql(u8, res.last.?, "Last"));
-    expect(res.suffix == null);
+    try expect(std.mem.eql(u8, res.first.?, "First"));
+    try expect(std.mem.eql(u8, res.prefix.?, "von"));
+    try expect(std.mem.eql(u8, res.last.?, "Last"));
+    try expect(res.suffix == null);
 
     res = try ListField.parse_name("von de of Last Last, First Other");
-    expect(std.mem.eql(u8, res.first.?, "First Other"));
-    expect(std.mem.eql(u8, res.prefix.?, "von de of"));
-    expect(std.mem.eql(u8, res.last.?, "Last Last"));
-    expect(res.suffix == null);
+    try expect(std.mem.eql(u8, res.first.?, "First Other"));
+    try expect(std.mem.eql(u8, res.prefix.?, "von de of"));
+    try expect(std.mem.eql(u8, res.last.?, "Last Last"));
+    try expect(res.suffix == null);
 
     // 2 commas
     res = try ListField.parse_name("von Last, Jr., First");
-    expect(std.mem.eql(u8, res.first.?, "First"));
-    expect(std.mem.eql(u8, res.prefix.?, "von"));
-    expect(std.mem.eql(u8, res.last.?, "Last"));
-    expect(std.mem.eql(u8, res.suffix.?, "Jr."));
+    try expect(std.mem.eql(u8, res.first.?, "First"));
+    try expect(std.mem.eql(u8, res.prefix.?, "von"));
+    try expect(std.mem.eql(u8, res.last.?, "Last"));
+    try expect(std.mem.eql(u8, res.suffix.?, "Jr."));
 
     res = try ListField.parse_name("   von de of Last Last, Jr. Sr., First Other");
-    expect(std.mem.eql(u8, res.first.?, "First Other"));
-    expect(std.mem.eql(u8, res.prefix.?, "von de of"));
-    expect(std.mem.eql(u8, res.last.?, "Last Last"));
-    expect(std.mem.eql(u8, res.suffix.?, "Jr. Sr."));
+    try expect(std.mem.eql(u8, res.first.?, "First Other"));
+    try expect(std.mem.eql(u8, res.prefix.?, "von de of"));
+    try expect(std.mem.eql(u8, res.last.?, "Last Last"));
+    try expect(std.mem.eql(u8, res.suffix.?, "Jr. Sr."));
 }
 
 pub const Entry = struct {

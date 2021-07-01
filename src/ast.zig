@@ -225,13 +225,13 @@ test "node remove_child first_child of 3" {
     parent.append_child(child3);
 
     parent.remove_child(child1);
-    expect(parent.first_child == child2);
-    expect(parent.last_child  == child3);
+    try expect(parent.first_child == child2);
+    try expect(parent.last_child  == child3);
 
-    expect(child2.next == child3);
-    expect(child1.next == null);
-    expect(child1.parent == null);
-    expect(child3.next == null);
+    try expect(child2.next == child3);
+    try expect(child1.next == null);
+    try expect(child1.parent == null);
+    try expect(child3.next == null);
 }
 
 test "node remove_child middle_child of 3" {
@@ -251,14 +251,14 @@ test "node remove_child middle_child of 3" {
     parent.append_child(child3);
 
     parent.remove_child(child2);
-    expect(parent.first_child == child1);
-    expect(parent.last_child  == child3);
+    try expect(parent.first_child == child1);
+    try expect(parent.last_child  == child3);
 
-    expect(child2.next == null);
-    expect(child2.parent == null);
+    try expect(child2.next == null);
+    try expect(child2.parent == null);
 
-    expect(child1.next == child3);
-    expect(child3.next == null);
+    try expect(child1.next == child3);
+    try expect(child3.next == null);
 }
 
 test "node remove_child last_child of 3" {
@@ -278,14 +278,14 @@ test "node remove_child last_child of 3" {
     parent.append_child(child3);
 
     parent.remove_child(child3);
-    expect(parent.first_child == child1);
-    expect(parent.last_child  == child2);
+    try expect(parent.first_child == child1);
+    try expect(parent.last_child  == child2);
 
-    expect(child1.next == child2);
-    expect(child2.next == null);
+    try expect(child1.next == child2);
+    try expect(child2.next == null);
 
-    expect(child3.next == null);
-    expect(child3.parent == null);
+    try expect(child3.next == null);
+    try expect(child3.parent == null);
 }
 
 test "node remove_child only_child" {
@@ -299,11 +299,11 @@ test "node remove_child only_child" {
     parent.append_child(child1);
 
     parent.remove_child(child1);
-    expect(parent.first_child == null);
-    expect(parent.last_child  == null);
+    try expect(parent.first_child == null);
+    try expect(parent.last_child  == null);
 
-    expect(child1.next == null);
-    expect(child1.parent == null);
+    try expect(child1.next == null);
+    try expect(child1.parent == null);
 }
 
 pub inline fn is_container_block(self: NodeKind) bool {

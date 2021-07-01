@@ -10,6 +10,7 @@ pub const Error = error {
     NoMatchingField,
 };
 
+/// should be called with an arena allocator
 pub fn bib_to_csl_json(
     allocator: *std.mem.Allocator,
     bib: bibtex.Bibliography,
@@ -19,24 +20,57 @@ pub fn bib_to_csl_json(
 
     var bib_iter = bib.label_entry_map.iterator();
     while (bib_iter.next()) |map_entry| {
-        const id = map_entry.key;
-        const entry = &map_entry.value;
+        const id = map_entry.key_ptr.*;
+        const entry = map_entry.value_ptr;
         var csl_type = bib_entry_to_csl_item(entry._type) catch continue;
 
-        var item = csl.Item{
-            .@"type" = csl_type,
-            .id = .{
-                .string = try maybe_copy_string(allocator, copy_strings, id) },
-            .optionals = csl.PropertyMap.init(allocator),
-        };
+        var item = csl.Item.init(
+            allocator, csl_type,
+            .{ .string = try maybe_copy_string(allocator, copy_strings, id) });
 
         var fields_iter = entry.fields.iterator();
         while (fields_iter.next()) |field_entry| {
-            const field_name = field_entry.value.name;
-            if (field_name == .custom) continue;
-            set_bib_field_on_csl(
-                allocator, field_name, field_entry.value.data,
-                &item.optionals, copy_strings) catch continue;
+            const field_name = field_entry.value_ptr.name;
+            switch (field_name) {
+                .custom, .month, .year => continue,
+                else => set_bib_field_on_csl(
+                    allocator, field_name, field_entry.value_ptr.data,
+                    &item.optionals, copy_strings) catch continue,
+            }
+        }
+
+        // set month/year separately
+        var date_parts_start = try allocator.alloc(csl.OrdinaryVar, 2);
+        const mb_year  = entry.fields.get("year");
+        if (mb_year) |year| {
+            date_parts_start[0] = .{
+                .string = try maybe_copy_string(
+                    allocator, copy_strings, year.data.literal_field.value)
+            };
+            var slice_idx: u8 = 1;
+            // in CSL it's only allowed to specify a month if there was a year specified
+            const mb_month = entry.fields.get("month");
+            if (mb_month) |month| {
+                date_parts_start[1] = .{
+                    .string = try maybe_copy_string(
+                        allocator, copy_strings, month.data.literal_field.value) };
+                slice_idx = 2;
+            } else {
+                // free the second OrdinaryVar
+                allocator.destroy(&date_parts_start[1]);
+            }
+
+            var date_slice = try allocator.create([]csl.OrdinaryVar);
+            date_slice.* = date_parts_start[0..slice_idx];
+            try item.optionals.put(
+                "issued",
+                csl.Property{
+                    .issued = .{
+                        // cast *[]OrdinaryVar to ptr to array with size 1 to be able to then slice it
+                        .date = .{ .@"date-parts" = @as(*[1][]csl.OrdinaryVar, date_slice)[0..] }
+                    }
+                }
+            );
         }
 
         try items.append(item);
@@ -45,10 +79,11 @@ pub fn bib_to_csl_json(
     return items.toOwnedSlice();
 }
 
+
 // TODO proper tests
 test "bib to csl" {
     const alloc = std.testing.allocator;
-    const file = try std.fs.cwd().openFile("book-2020-07-28.bib", .{ .read = true });
+    const file = try std.fs.cwd().openFile("book.bib", .{ .read = true });
     defer file.close();
 
     const contents = try file.reader().readAllAlloc(
@@ -57,7 +92,7 @@ test "bib to csl" {
     );
     defer alloc.free(contents);
 
-    var bibparser = bibtex.BibParser.init(alloc, "book-2020-07-28.bib", contents);
+    var bibparser = bibtex.BibParser.init(alloc, "book.bib", contents);
     var bib = try bibparser.parse();
     defer bib.deinit();
     var arena = std.heap.ArenaAllocator.init(alloc);
@@ -65,7 +100,7 @@ test "bib to csl" {
     var csl_json = try bib_to_csl_json(&arena.allocator, bib, false);
 
     const write_file = try std.fs.cwd().createFile(
-        "bib.json",
+        "bib_.json",
         // truncate: reduce file to length 0 if it exists
         .{ .read = true, .truncate = true },
     );
@@ -180,57 +215,6 @@ pub fn bib_entry_to_csl_item(entry_type: bibtex.EntryType) !csl.ItemType {
     };
 }
 
-inline fn set_issued(
-    allocator: *std.mem.Allocator,
-    field_name: bibtex.FieldName,
-    field_data: bibtex.FieldType,
-    item_props: *csl.PropertyMap,
-    comptime date_part_idx: usize,
-    comptime copy_strings: bool,
-) !?csl.Property {
-    if (date_part_idx > 2) {
-        @compileError("date_part_idx can only range from 0-2 (0: year, 1: month, 2: day)!");
-    }
-
-    var mb_target = item_props.get("issued");
-    if (mb_target) |target| {
-        switch (target.issued) {
-            // don't overwrite target's date union if it has an incompatible version
-            .edtf => {},
-            .date => |*value| {
-                if (value.raw == null and value.literal == null and value.edtf == null) {
-                    const parts = value.@"date-parts".?;
-                    if (parts.items.len == 1 and parts.items[0].items.len >= date_part_idx + 1) {
-                        parts.items[0].items[date_part_idx] = .{
-                            .string = try maybe_copy_string(
-                                        allocator, copy_strings, field_data.literal_field.value),
-                        };
-                    }
-                }
-            },
-        }
-        return null;
-    } else {
-        var date_parts = try allocator.create(csl.DateVar.DateParts);
-        date_parts.* = csl.DateVar.DateParts.init(allocator);
-        try date_parts.append(std.ArrayList(?csl.OrdinaryVar).init(allocator));
-
-        if (date_part_idx == 1) {
-            // append null for year if we're setting month
-            try date_parts.items[0].append(null);
-        }
-        try date_parts.items[0].append(csl.OrdinaryVar{
-            .string = try maybe_copy_string(
-                        allocator, copy_strings, field_data.literal_field.value)
-        });
-        return csl.Property{
-            .issued = .{
-                .date = .{ .@"date-parts" = date_parts }
-            }
-        };
-    }
-}
-
 pub fn set_bib_field_on_csl(
     allocator: *std.mem.Allocator,
     field_name: bibtex.FieldName,
@@ -239,6 +223,9 @@ pub fn set_bib_field_on_csl(
     comptime copy_strings: bool,
 ) !void {
     var csl_prop: csl.Property = undefined;
+
+    // NOTE: setting month and year separately so we can build the whole date-parts struct
+    // or edtf string
     switch (field_name) {
         .custom,  // arbitrary name to e.g. save additional info
         => return Error.NoMatchingField,
@@ -384,14 +371,6 @@ pub fn set_bib_field_on_csl(
         .version,
         => csl_prop = .{ .version = try maybe_copy_string(
                     allocator, copy_strings, field_data.literal_field.value), },
-
-        .month,
-        => csl_prop = (try set_issued(allocator, field_name, field_data, item_props, 1, copy_strings))
-            orelse return,
-
-        .year,
-        => csl_prop = (try set_issued(allocator, field_name, field_data, item_props, 0, copy_strings))
-            orelse return,
 
         .usera, .userb, .userc, .userd, .usere, .userf,
         .verba, .verbb, .verbc,

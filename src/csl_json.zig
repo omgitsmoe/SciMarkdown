@@ -1,12 +1,22 @@
 const std = @import("std");
+const mem = std.mem;
 const utils = @import("utils.zig");
 const expect = std.testing.expect;
+const log = std.log;
 
 pub const Item = struct {
     // required: type, id; no additional properties
     @"type": ItemType,  // string -> enum
     id: OrdinaryVar,
     optionals: PropertyMap,
+
+    pub fn init(alloactor: *std.mem.Allocator, _type: ItemType, id: OrdinaryVar) Item {
+        return Item{
+            .@"type" = _type,
+            .id = id,
+            .optionals = PropertyMap.init(alloactor),
+        };
+    }
 };
 pub const PropertyMap = std.StringHashMap(Property);
 
@@ -212,10 +222,9 @@ pub const DateVar = union(enum) {
     edtf: []const u8,
     date: Date,
 
-    pub const DateParts = std.ArrayList(std.ArrayList(?OrdinaryVar));
     pub const Date = struct {
         // 1-2 of 1-3 items [2][3]OrdinaryVar
-        @"date-parts": ?*DateParts = null,
+        @"date-parts": ?[][]OrdinaryVar = null,
         season: ?OrdinaryVar = null,
         circa: ?BoolLike = null,
         literal: ?[]const u8 = null,
@@ -229,23 +238,23 @@ pub const DateVar = union(enum) {
         ) !void {
             try out_stream.writeByte('{');
 
-            if (value.@"date-parts") |parts| {
-                try out_stream.writeAll("\"date-parts\":");
-                try out_stream.writeByte('[');
-                for (parts.items) |ord_arr, arr_i| {
-                    if (arr_i != 0)
-                        try out_stream.writeByte(',');
-                    try std.json.stringify(ord_arr.items, options, out_stream);
-                }
-                try out_stream.writeByte(']');
-            }
+            // if (value.@"date-parts") |parts| {
+            //     try out_stream.writeAll("\"date-parts\":");
+            //     try out_stream.writeByte('[');
+            //     for (parts) |ord_arr, arr_i| {
+            //         if (arr_i != 0)
+            //             try out_stream.writeByte(',');
+            //         try std.json.stringify(ord_arr, options, out_stream);
+            //     }
+            //     try out_stream.writeByte(']');
+            // }
             // iterate over struct fields
             inline for (@typeInfo(@This()).Struct.fields) |Field, field_i| {
-                comptime {
-                    if (std.mem.eql(u8, Field.name, "date-parts")) {
-                        continue;
-                    }
-                }
+                // comptime {
+                //     if (std.mem.eql(u8, Field.name, "date-parts")) {
+                //         continue;
+                //     }
+                // }
 
                 if (field_i != 0)
                     try out_stream.writeByte(',');
@@ -320,6 +329,11 @@ pub const CitationItem = struct {
     };
 };
 
+// TODO @Speed
+// makes more sense to store this as a map internally, even though the schema states
+// it is an array of Items
+// pub const CSLJsonMap = std.StringHashMap(Item);
+
 pub fn write_items_json(allocator: *std.mem.Allocator, items: []Item, out_stream: anytype) !void {
     try out_stream.writeByte('[');
     const len = items.len;
@@ -335,9 +349,9 @@ pub fn write_items_json(allocator: *std.mem.Allocator, items: []Item, out_stream
         while (props_iter.next()) |prop_entry| {
             try out_stream.writeAll(", ");
             try out_stream.writeAll("\"");
-            try out_stream.writeAll(prop_entry.key);
+            try out_stream.writeAll(prop_entry.key_ptr.*);
             try out_stream.writeAll("\": ");
-            try std.json.stringify(prop_entry.value, .{}, out_stream);
+            try std.json.stringify(prop_entry.value_ptr, .{}, out_stream);
         }
         try out_stream.writeByte('}');
         if (i != len - 1)
@@ -345,3 +359,243 @@ pub fn write_items_json(allocator: *std.mem.Allocator, items: []Item, out_stream
     }
     try out_stream.writeByte(']');
 }
+
+pub fn read_items_json(allocator: *std.mem.Allocator, input: []const u8) !CSLJsonParser.Result {
+    var parser = CSLJsonParser.init(allocator, input);
+    return parser.parse();
+}
+
+test "read csl json" {
+    const allocator = std.testing.allocator;
+    const csljson =
+        \\[{"type": "article-journal", "id": "Ismail2007",
+        \\"author": [{"family":"Ismail","given":"R",
+        \\"dropping-particle":null,"non-dropping-particle":null,"suffix":null,
+        \\"comma-suffix":null,"static-ordering":null,"literal":null,"parse-names":null},
+        \\{"family":"Mutanga","given":"O","parse-names":null}],
+        \\"issued": {"date-parts":[["2007"]],"season":null,"circa":null,
+        \\"literal":null,"raw":null,"edtf":null}, "number": "1",
+        \\"title": "Forest health and vitality: the detection and monitoring of Pinus patula trees infected by Sirex noctilio using digital multispectral imagery",
+        \\"DOI": "10.2989/shfj.2007.69.1.5.167", "volume": "69", "page": "39--47",
+        \\"publisher": "Informa UK Limited", "container-title": "Southern Hemisphere Forestry Journal"}]
+    ;
+
+    const parse_result = try read_items_json(allocator, csljson[0..]);
+    defer parse_result.arena.deinit();
+    const items = parse_result.items;
+
+    try expect(items.len == 1);
+    const it = items[0];
+    try expect(it.@"type" == .@"article-journal");
+    try expect(it.id == .string);
+    try expect(mem.eql(u8, it.id.string, "Ismail2007"));
+
+    // const authors = it.optionals.get("author").?.author;
+    // try expect(authors.len == 2);
+    // try expect(mem.eql(u8, authors[0].family.?, "Ismail"));
+    // try expect(mem.eql(u8, authors[0].given.?, "R"));
+    // try expect(authors[0].@"dropping-particle" == null);
+    // try expect(authors[0].@"non-dropping-particle" == null);
+    // try expect(authors[0].suffix == null);
+    // try expect(authors[0].@"comma-suffix" == null);
+    // try expect(authors[0].@"static-ordering" == null);
+    // try expect(authors[0].literal == null);
+    // try expect(authors[0].@"parse-names" == null);
+    std.debug.print("Optionals {d}\n", .{ it.optionals.count() });
+    var iter = it.optionals.iterator();
+    while (iter.next()) |entry| {
+        std.debug.print("Entry: K {s} V {any}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
+    }
+    try expect(0 == 1);
+}
+
+pub const CSLJsonParser = struct {
+    stream: std.json.TokenStream,
+    arena: std.heap.ArenaAllocator,
+    items: std.ArrayList(Item),
+    state: State,
+    current: u32,
+    input: []const u8,
+
+    const State = enum {
+        begin,
+        items_start,
+        item_begin,
+        item_end,
+        expect_id,
+        expect_type,
+        after_field_value,
+        end,
+    };
+
+    pub const Error = error {
+        UnexpectedToken,
+        ParserFinished,
+        ParserNotFinished,
+        UnknownItemType,
+        UnknownProperty,
+    };
+
+    pub const Result = struct {
+        arena: std.heap.ArenaAllocator,
+        items: []Item,
+    };
+
+    pub fn init(allocator: *std.mem.Allocator, input: []const u8) CSLJsonParser {
+        var parser = CSLJsonParser{
+            .stream = std.json.TokenStream.init(input),
+            .arena = std.heap.ArenaAllocator.init(allocator),
+            .items = undefined,
+            .current = undefined,
+            .input = input,
+            .state = .begin,
+        };
+        return parser;
+    }
+
+    pub fn parse(self: *@This()) !Result {
+        // NOTE: can't be initialized in init since the address of the arena.allocator
+        // will change
+        self.items = std.ArrayList(Item).init(&self.arena.allocator);
+
+        while (try self.stream.next()) |token| {
+            try self.feed(token);
+        }
+
+        switch (self.state) {
+            .end => return Result{ .arena = self.arena, .items = self.items.toOwnedSlice() },
+            else => return Error.ParserNotFinished,
+        }
+    }
+
+    fn feed(self: *@This(), token: std.json.Token) !void {
+        // []NameVar (only arr)
+        // []const u8
+        // []const []const u8 (only categories)
+        // DateVar
+        // OrdinaryVar
+        switch (self.state) {
+            .begin => {
+                switch (token) {
+                    .ArrayBegin => self.state = .items_start,
+                    else => return Error.UnexpectedToken,
+                }
+            },
+            .items_start, .item_end => {
+                switch (token) {
+                    .ObjectBegin => {
+                        self.state = .item_begin;
+                        const item: *Item = try self.items.addOne();
+                        // init PropertyMap
+                        item.optionals = PropertyMap.init(&self.arena.allocator);
+                        self.current = @intCast(u32, self.items.items.len) - 1;
+                    },
+                    .ArrayEnd => self.state = .end,
+                    else => return Error.UnexpectedToken,
+                }
+            },
+            .item_begin, .after_field_value => {
+                switch (token) {
+                    .String => |str| {
+                        // assume that the field name doesn't contain escapes
+                        const current_field = str.slice(self.input, self.stream.i - 1);
+                        if (mem.eql(u8, "id", current_field)) {
+                            self.state = .expect_id;
+                        } else if (mem.eql(u8, "type", current_field)) {
+                            self.state = .expect_type;
+                        } else {
+                            // we have to call parse here directly otherwise (if we wait to be
+                            // fed the token) the tokenstream will have advanced beyond the start
+                            // of the obj/value already
+                            // json.parse for Propery needs alot of comptime backward branches
+                            @setEvalBranchQuota(5000);
+                            var props = self.items.items[self.current].optionals;
+                            // let json.parse handle parsing the Propery tagged union
+                            // TODO switch on the current_field/use stringToEnum and then switch
+                            // and call json.parse to parse the proper type directly
+                            // since json.parse will just parse the first matching union type
+                            // so e.g. citation-key and language will always end up as citation-key
+                            const property = std.json.parse(
+                                Property, &self.stream,
+                                .{ .allocator = self.items.allocator,
+                                   .allow_trailing_data = true }
+                            ) catch |err| {
+                                log.err("Could not parse property for field: {s} due to err {s}\n",
+                                        .{ current_field, err });
+                                return Error.UnknownProperty;
+                            };
+                            std.debug.print("putting {s}\n", .{ @tagName(property) });
+                            try props.put(current_field, property);
+                            self.state = .after_field_value;
+                        }
+                    },
+                    .ObjectEnd => self.state = .item_end,
+                    else => return Error.UnexpectedToken,
+                }
+            },
+            .expect_id => {
+                switch (token) {
+                    .String => |str| {
+                        const slice = str.slice(self.input, self.stream.i - 1);
+                        self.items.items[self.current].id = .{ .string = try self.copy_string(str, slice) };
+                    },
+                    .Number => |num| {
+                        if (!num.is_integer) {
+                            return Error.UnexpectedToken;
+                        }
+                        const slice = num.slice(self.input, self.stream.i - 1);
+                        const parsed = std.fmt.parseInt(i32, slice, 10) catch return Error.UnexpectedToken;
+                        self.items.items[self.current].id = .{ .number = parsed };
+                    },
+                    else => return Error.UnexpectedToken,
+                }
+
+                self.state = .after_field_value;
+            },
+            .expect_type => {
+                switch (token) {
+                    .String => |str| {
+                        const slice = str.slice(self.input, self.stream.i - 1);
+                        const mb_item_type = std.meta.stringToEnum(ItemType, slice);
+                        if (mb_item_type) |item_type| {
+                            self.items.items[self.current].@"type" = item_type;
+                        } else {
+                            log.err("Unknown CSL-JSON item type: {s}\n", .{ slice });
+                            return Error.UnknownItemType;
+                        }
+                        self.state = .after_field_value;
+                    },
+                    else => return Error.UnexpectedToken,
+                }
+            },
+            .end => return Error.ParserFinished,
+        }
+    }
+
+    // copies the string from a json string token wihout backslashes
+    fn copy_string(
+        self: *@This(),
+        str: std.meta.TagPayload(std.json.Token, .String),
+        slice: []const u8
+    ) ![]const u8 {
+
+        if (str.escapes == .Some) {
+            var strbuf = try std.ArrayList(u8).initCapacity(
+                    self.items.allocator, str.decodedLength());
+
+            var escaped = false;
+            for (slice) |b| {
+                if (escaped) {
+                    escaped = false;
+                } else if (b == '\\') {
+                    escaped = true;
+                }
+                strbuf.appendAssumeCapacity(b);
+            }
+
+            return strbuf.toOwnedSlice();
+        } else {
+            return mem.dupe(self.items.allocator, u8, slice);
+        }
+    }
+};

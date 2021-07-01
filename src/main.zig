@@ -126,7 +126,7 @@ pub fn main() !void {
         }
     }
 
-    if (ref_file != null or csl_file != null) {
+    if (parser.citations.items.len > 0 and (ref_file != null or csl_file != null)) {
         if (ref_file != null and csl_file != null) {
             const bib_entries = try run_citeproc(
                 &parser.node_arena.allocator, parser.citations.items, ref_file.?, csl_file.?);
