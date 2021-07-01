@@ -376,7 +376,7 @@ test "read csl json" {
         \\"issued": {"date-parts":[["2007"]],"season":null,"circa":null,
         \\"literal":null,"raw":null,"edtf":null}, "number": "1",
         \\"title": "Forest health and vitality: the detection and monitoring of Pinus patula trees infected by Sirex noctilio using digital multispectral imagery",
-        \\"DOI": "10.2989/shfj.2007.69.1.5.167", "volume": "69", "page": "39--47",
+        \\"DOI": "10.2989/shfj.2007.69.1.5.167", "volume": 69, "page": "39--47",
         \\"publisher": "Informa UK Limited", "container-title": "Southern Hemisphere Forestry Journal"}]
     ;
 
@@ -390,23 +390,43 @@ test "read csl json" {
     try expect(it.id == .string);
     try expect(mem.eql(u8, it.id.string, "Ismail2007"));
 
-    // const authors = it.optionals.get("author").?.author;
-    // try expect(authors.len == 2);
-    // try expect(mem.eql(u8, authors[0].family.?, "Ismail"));
-    // try expect(mem.eql(u8, authors[0].given.?, "R"));
-    // try expect(authors[0].@"dropping-particle" == null);
-    // try expect(authors[0].@"non-dropping-particle" == null);
-    // try expect(authors[0].suffix == null);
-    // try expect(authors[0].@"comma-suffix" == null);
-    // try expect(authors[0].@"static-ordering" == null);
-    // try expect(authors[0].literal == null);
-    // try expect(authors[0].@"parse-names" == null);
-    std.debug.print("Optionals {d}\n", .{ it.optionals.count() });
-    var iter = it.optionals.iterator();
-    while (iter.next()) |entry| {
-        std.debug.print("Entry: K {s} V {any}\n", .{ entry.key_ptr.*, entry.value_ptr.* });
-    }
-    try expect(0 == 1);
+    const authors = it.optionals.get("author").?.author;
+    try expect(authors.len == 2);
+    try expect(mem.eql(u8, authors[0].family.?, "Ismail"));
+    try expect(mem.eql(u8, authors[0].given.?, "R"));
+    try expect(authors[0].@"dropping-particle" == null);
+    try expect(authors[0].@"non-dropping-particle" == null);
+    try expect(authors[0].suffix == null);
+    try expect(authors[0].@"comma-suffix" == null);
+    try expect(authors[0].@"static-ordering" == null);
+    try expect(authors[0].literal == null);
+    try expect(authors[0].@"parse-names" == null);
+
+    const issued = it.optionals.get("issued").?.issued.date.@"date-parts".?;
+    try expect(issued.len == 1);
+    try expect(issued[0].len == 1);
+    try expect(mem.eql(u8, issued[0][0].string, "2007"));
+
+    const number = it.optionals.get("number").?.number;
+    try expect(mem.eql(u8, number.string, "1"));
+
+    const title = it.optionals.get("title").?.title;
+    try expect(mem.eql(u8, title, "Forest health and vitality: the detection and monitoring of Pinus patula trees infected by Sirex noctilio using digital multispectral imagery"));
+
+    const doi = it.optionals.get("DOI").?.DOI;
+    try expect(mem.eql(u8, doi, "10.2989/shfj.2007.69.1.5.167"));
+
+    const volume = it.optionals.get("volume").?.volume;
+    try expect(volume.number == 69);
+
+    const page = it.optionals.get("page").?.page;
+    try expect(mem.eql(u8, page.string, "39--47"));
+
+    const publisher = it.optionals.get("publisher").?.publisher;
+    try expect(mem.eql(u8, publisher, "Informa UK Limited"));
+
+    const container_title = it.optionals.get("container-title").?.@"container-title";
+    try expect(mem.eql(u8, container_title, "Southern Hemisphere Forestry Journal"));
 }
 
 pub const CSLJsonParser = struct {
@@ -504,28 +524,10 @@ pub const CSLJsonParser = struct {
                         } else if (mem.eql(u8, "type", current_field)) {
                             self.state = .expect_type;
                         } else {
-                            // we have to call parse here directly otherwise (if we wait to be
+                            // we have to call this here directly otherwise (if we wait to be
                             // fed the token) the tokenstream will have advanced beyond the start
                             // of the obj/value already
-                            // json.parse for Propery needs alot of comptime backward branches
-                            @setEvalBranchQuota(5000);
-                            var props = self.items.items[self.current].optionals;
-                            // let json.parse handle parsing the Propery tagged union
-                            // TODO switch on the current_field/use stringToEnum and then switch
-                            // and call json.parse to parse the proper type directly
-                            // since json.parse will just parse the first matching union type
-                            // so e.g. citation-key and language will always end up as citation-key
-                            const property = std.json.parse(
-                                Property, &self.stream,
-                                .{ .allocator = self.items.allocator,
-                                   .allow_trailing_data = true }
-                            ) catch |err| {
-                                log.err("Could not parse property for field: {s} due to err {s}\n",
-                                        .{ current_field, err });
-                                return Error.UnknownProperty;
-                            };
-                            std.debug.print("putting {s}\n", .{ @tagName(property) });
-                            try props.put(current_field, property);
+                            try self.parse_property(current_field);
                             self.state = .after_field_value;
                         }
                     },
@@ -597,5 +599,143 @@ pub const CSLJsonParser = struct {
         } else {
             return mem.dupe(self.items.allocator, u8, slice);
         }
+    }
+
+    fn parse_property(self: *@This(), prop_name: []const u8) !void {
+        // json.parse for Propery needs alot of comptime backward branches
+        @setEvalBranchQuota(3000);
+        // let json.parse handle parsing the Propery tagged union
+        // NOTE: we have to use stringToEnum and then switch on the tag
+        // and call json.parse to parse the proper type directly
+        // since json.parse will just parse the first matching union type
+        // so e.g. citation-key and language will always end up as citation-key
+        const prop_kind = std.meta.stringToEnum(
+            std.meta.Tag(Property), prop_name) orelse return Error.UnknownProperty;
+
+        // @Compiler / @stdlib meta.TagPayload and @unionInit only work with comptime
+        // known values, would be really practical if there were runtime variants
+        // of these for getting the payload of a tag at runtime and the initializing
+        // the union with the active tag and payload at runtime as well
+        // TODO?
+        // const PayloadType = std.meta.TagPayload(Property, prop_kind);
+        // const payload = std.json.parse(
+        //     PayloadType, &self.stream,
+        //     .{ .allocator = self.items.allocator,
+        //        .allow_trailing_data = true }
+        // ) catch |err| {
+        //     log.err("Could not parse property for field: {s} due to err {s}\n",
+        //             .{ prop_name, err });
+        //     return Error.UnknownProperty;
+        // };
+        // std.debug.print("putting {s}\n", .{ @tagName(prop_kind) });
+        // try props.put(current_field, @unionInit(Property, @tagName(prop_kind), payload));
+
+        // @Compiler type has to be comptime known and there is no runtime type information???
+        var prop: Property = undefined;
+        // switch on tag so we know which payload type we have to parse then set prop using
+        // json.parse's result
+        switch (prop_kind) {
+            .@"citation-key", .language, .journalAbbreviation, .shortTitle,
+            .abstract, .annote, .archive, .archive_collection, .archive_location,
+            .@"archive-place", .authority, .@"call-number",
+            .@"citation-label", .@"collection-title", .@"container-title",
+            .@"container-title-short", .dimensions, .division, .DOI,
+            // Deprecated - use '@"event-title' instead. Will be removed in 1.1
+            // event: []const u8,
+            .@"event-title", .@"event-place", .genre, .ISBN, .ISSN, .jurisdiction,
+            .keyword, .medium, .note, .@"original-publisher", .@"original-publisher-place",
+            .@"original-title", .@"part-title", .PMCID, .PMID, .publisher, .@"publisher-place",
+            .references, .@"reviewed-genre", .@"reviewed-title", .scale, .section, .source,
+            .status, .title, .@"title-short", .URL, .version, .@"volume-title",
+            .@"volume-title-short", .@"year-suffix",
+            => {
+                // []const u8,
+                const payload = std.json.parse(
+                    []const u8, &self.stream,
+                    .{ .allocator = self.items.allocator,
+                       .allow_trailing_data = true }
+                ) catch |err| {
+                    log.err("Could not parse property for field: {s} due to err {s}\n",
+                            .{ prop_name, err });
+                    return Error.UnknownProperty;
+                };
+                prop = utils.unionInitTagged(Property, prop_kind, []const u8, payload);
+            },
+
+            .categories => {
+                // []const []const u8,
+                const payload = std.json.parse(
+                    []const []const u8, &self.stream,
+                    .{ .allocator = self.items.allocator,
+                       .allow_trailing_data = true }
+                ) catch |err| {
+                    log.err("Could not parse property for field: {s} due to err {s}\n",
+                            .{ prop_name, err });
+                    return Error.UnknownProperty;
+                };
+                prop = utils.unionInitTagged(Property, prop_kind, []const []const u8, payload);
+            },
+
+            .author, .chair, .@"collection-editor", .compiler, .composer,
+            .@"container-author", .contributor, .curator, .director,
+            .editor, .@"editorial-director", .@"executive-producer", .guest,
+            .host, .interviewer, .illustrator, .narrator, .organizer,
+            .@"original-author", .performer, .producer, .recipient,
+            .@"reviewed-author", .@"script-writer", .@"series-creator", .translator
+            => {
+                // []NameVar
+                const payload = std.json.parse(
+                    []NameVar, &self.stream,
+                    .{ .allocator = self.items.allocator,
+                       .allow_trailing_data = true }
+                ) catch |err| {
+                    log.err("Could not parse property for field: {s} due to err {s}\n",
+                            .{ prop_name, err });
+                    return Error.UnknownProperty;
+                };
+                prop = utils.unionInitTagged(Property, prop_kind, []NameVar, payload);
+            },
+
+            .accessed, .@"available-date", .@"event-date", .issued,
+            .@"original-date", .submitted
+            => {
+                // DateVar
+                const payload = std.json.parse(
+                    DateVar, &self.stream,
+                    .{ .allocator = self.items.allocator,
+                       .allow_trailing_data = true }
+                ) catch |err| {
+                    log.err("Could not parse property for field: {s} due to err {s}\n",
+                            .{ prop_name, err });
+                    return Error.UnknownProperty;
+                };
+                prop = utils.unionInitTagged(Property, prop_kind, DateVar, payload);
+            },
+
+
+            .@"chapter-number", .@"citation-number", .@"collection-number", .edition,
+            .@"first-reference-note-number", .issue, .locator, .number,
+            .@"number-of-pages", .@"number-of-volumes", .page, .@"page-first",
+            .part, .printing, .supplement, .volume,
+            => {
+                // OrdinaryVar
+                const payload = std.json.parse(
+                    OrdinaryVar, &self.stream,
+                    .{ .allocator = self.items.allocator,
+                       .allow_trailing_data = true }
+                ) catch |err| {
+                    log.err("Could not parse property for field: {s} due to err {s}\n",
+                            .{ prop_name, err });
+                    return Error.UnknownProperty;
+                };
+                prop = utils.unionInitTagged(Property, prop_kind, OrdinaryVar, payload);
+            },
+        }
+
+        // NOTE: important to take the address here otherwise we copy the
+        // PropertyMap and the state gets reset when exiting this function
+        var props = &self.items.items[self.current].optionals;
+        // add to PropertyMap
+        try props.put(prop_name, prop);
     }
 };

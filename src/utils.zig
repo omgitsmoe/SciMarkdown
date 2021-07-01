@@ -104,6 +104,52 @@ pub fn DepthFirstIterator(
     };
 }
 
+/// intialize a union with a PayloadType that is known at comptime, but the tag and value only
+/// being known at runtime
+pub fn unionInitTagged(comptime U: type, tag: std.meta.Tag(U), comptime PayloadType: type, val: anytype) U {
+    const uT = @typeInfo(U).Union;
+    inline for (uT.fields) |union_field, enum_i| {
+        // field types don't match -> otherwise @unionInit compile error
+        if (union_field.field_type != PayloadType)
+            continue;
+        // check for active tag
+        if (enum_i == @enumToInt(tag)) {
+            // @compileLog("unionfield name ", union_field.name);
+            // @compileLog("enum i ", enum_i, "tag ", @enumToInt(tag));
+            return @unionInit(U, union_field.name, val);
+        }
+    }
+    // without this return type might be void
+    unreachable;
+}
+
+// src: https://github.com/ziglang/zig/issues/9271 by dbandstra
+pub fn unionPayloadPtr(comptime T: type, union_ptr: anytype) ?*T {
+    const U = @typeInfo(@TypeOf(union_ptr)).Pointer.child;
+    inline for (@typeInfo(U).Union.fields) |field, i| {
+        if (field.field_type != T)
+            continue;
+        std.debug.print("Ptrint: {d}\n", .{ @enumToInt(union_ptr.*) });
+        if (@enumToInt(union_ptr.*) == i)
+            return &@field(union_ptr, field.name);
+    }
+    return null;
+}
+
+pub fn unionSetPayload(comptime T: type, union_ptr: anytype, value: T) void {
+    const U = @typeInfo(@TypeOf(union_ptr)).Pointer.child;
+    inline for (@typeInfo(U).Union.fields) |field, i| {
+        if (field.field_type != T)
+            continue;
+        if (@enumToInt(union_ptr.*) == i) {
+            @field(union_ptr, field.name) = value;
+            break;
+        }
+    } else {
+        unreachable;
+    }
+}
+
 /// all of the string is_.. functions are ascii only!!
 pub inline fn is_alpha(char: u8) bool {
     if ((char >= 'A' and char <= 'Z') or
