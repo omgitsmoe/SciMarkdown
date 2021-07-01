@@ -8,6 +8,8 @@ const Node = ast.Node;
 const TokenKind = @import("tokenizer.zig").TokenKind;
 const csl = @import("csl_json.zig");
 const CitationItem = csl.CitationItem;
+const bib_to_csl_json = @import("bib_to_csl.zig").bib_to_csl_json;
+const bibtex = @import("bibtex.zig");
 
 const builtin = @import("builtin.zig");
 const BuiltinCall = builtin.BuiltinCall;
@@ -309,4 +311,73 @@ pub fn run_citeproc(
 
     var res = try nodes_from_citeproc_json(allocator, stdout, cite_nodes);
     return res;
+}
+
+pub fn csl_items_from_file(
+    allocator: *std.mem.Allocator,
+    filename: []const u8,
+    write_conversion: bool
+) !csl.CSLJsonParser.Result {
+    var ref_file_type = enum { bib, json, unsupported }.unsupported;
+    if (std.mem.endsWith(u8, filename, ".bib")) {
+        ref_file_type = .bib;
+    } else if (std.mem.endsWith(u8, filename, ".json")) {
+        ref_file_type = .json;
+    } else {
+        log.err("Only CSL-JSON and bib(la)tex are supported as bibliography file formats!", .{});
+        return error.UnsupportedRefFile;
+    }
+
+    const file = blk: {
+        if (std.fs.path.isAbsolute(filename)) {
+            break :blk try std.fs.openFileAbsolute(filename, .{ .read = true, .write = false });
+        } else {
+            break :blk try std.fs.cwd().openFile(filename, .{ .read = true, .write = false });
+        }
+    };
+    defer file.close();
+    // 20 MiB max
+    const ref_file_bytes = try file.readToEndAlloc(allocator, 20 * 1024 * 1024);
+    defer allocator.free(ref_file_bytes);
+
+    var csl_json_result: csl.CSLJsonParser.Result = undefined;
+    switch (ref_file_type) {
+        .bib => {
+            var bibparser = bibtex.BibParser.init(allocator, filename, ref_file_bytes);
+            var bib = try bibparser.parse();
+            defer bib.deinit();
+            var arena = std.heap.ArenaAllocator.init(allocator);
+            // NOTE: we copy the strings from the Bibliography values so we can free it
+            const items = try bib_to_csl_json(&arena.allocator, bib, true);
+            csl_json_result = .{ .arena = arena, .items = items };
+
+            // write file
+            if (write_conversion) {
+                // swap .bib with .json extension
+                var converted_fn = try allocator.alloc(u8, filename.len + 1);
+                @memcpy(converted_fn.ptr, filename.ptr, filename.len);
+                @memcpy(converted_fn[filename.len - 3..].ptr, "json", 4);
+
+                const write_file = blk: {
+                    if (std.fs.path.isAbsolute(converted_fn)) {
+                        // truncate: reduce file to length 0 if it exists
+                        break :blk try std.fs.createFileAbsolute(
+                                   converted_fn, .{ .read = true, .truncate = true });
+                    } else {
+                        break :blk try std.fs.cwd().createFile(
+                                   converted_fn, .{ .read = true, .truncate = true });
+                    }
+                };
+                defer write_file.close();
+
+                try csl.write_items_json(items, write_file.writer());
+            }
+        },
+        .json => {
+            csl_json_result = try csl.read_items_json(allocator, ref_file_bytes);
+        },
+        else => unreachable,
+    }
+
+    return csl_json_result;
 }

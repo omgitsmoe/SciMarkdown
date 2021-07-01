@@ -5,7 +5,8 @@ const builtin = @import("builtin");
 const Parser = @import("parser.zig").Parser;
 const HTMLGenerator = @import("html.zig").HTMLGenerator;
 const CodeRunner = @import("code_chunks.zig").CodeRunner;
-const run_citeproc = @import("cite.zig").run_citeproc;
+const cite = @import("cite.zig");
+const run_citeproc = cite.run_citeproc;
 const csl = @import("csl_json.zig");
 
 const clap = @import("zig-clap");
@@ -30,6 +31,7 @@ pub fn main() !void {
         clap.parseParam("-r, --references <FILENAME>      Path to references file (BibLaTeX or CSL-JSON).") catch unreachable,
         clap.parseParam("-s, --citation-style <FILENAME>  Path to CSL file.") catch unreachable,
         clap.parseParam("-l, --locale <LOCALE>  Specify locale as BCP 47 language tag.") catch unreachable,
+        clap.parseParam("--write-bib-conversion           Whether to write out the converted .bib file as CSL-JSON") catch unreachable,
         // clap.parseParam(
         //     "-s, --string <STR>...  An option parameter which can be specified multiple times.") catch unreachable,
         clap.parseParam("<IN-FILE>") catch unreachable,
@@ -135,23 +137,9 @@ pub fn main() !void {
 
     if (parser.citations.items.len > 0 and (ref_file != null or csl_file != null)) {
         if (ref_file != null and csl_file != null and csl_locale != null) {
-
-            // read csl json file
-            const ref_file_fd = blk: {
-                if (std.fs.path.isAbsolute(ref_file.?)) {
-                    break :blk try std.fs.openFileAbsolute(ref_file.?, .{ .read = true, .write = false });
-                } else {
-                    break :blk try std.fs.cwd().openFile(ref_file.?, .{ .read = true, .write = false });
-                }
-            };
-            defer ref_file_fd.close();
-
-            // 20 MiB max
-            const ref_file_bytes = try ref_file_fd.readToEndAlloc(allocator, 20 * 1024 * 1024);
-            defer allocator.free(ref_file_bytes);
-            const csl_json_result = try csl.read_items_json(allocator, ref_file_bytes);
+            const write_conversion = args.flag("--write-bib-conversion");
+            const csl_json_result = try cite.csl_items_from_file(allocator, ref_file.?, write_conversion);
             defer csl_json_result.arena.deinit();
-
             const bib_entries = try run_citeproc(
                 &parser.node_arena.allocator, parser.citations.items, csl_json_result.items,
                 csl_file.?, csl_locale.?);

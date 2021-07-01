@@ -1,4 +1,5 @@
 const std = @import("std");
+const mem = std.mem;
 const utils = @import("utils.zig");
 const expect = std.testing.expect;
 
@@ -51,9 +52,27 @@ pub fn bib_to_csl_json(
             // in CSL it's only allowed to specify a month if there was a year specified
             const mb_month = entry.fields.get("month");
             if (mb_month) |month| {
-                date_parts_start[1] = .{
-                    .string = try maybe_copy_string(
-                        allocator, copy_strings, month.data.literal_field.value) };
+                const month_str = month.data.literal_field.value;
+
+                // NOTE: citeproc doens't allow strings (that aren't numbers) in the date-parts array
+                const contains_alpha = blk: for (month_str) |c| {
+                    if (std.ascii.isAlpha(c)) {
+                        break :blk true;
+                    }
+                } else blk: { break :blk false; };
+
+                if (contains_alpha) {
+                    // convert to number
+                    const month_num = try bibtex_month_to_num(month_str);
+                    date_parts_start[1] = .{
+                        .number = month_num
+                    };
+                } else {
+                    date_parts_start[1] = .{
+                        .string = try maybe_copy_string(
+                            allocator, copy_strings, month.data.literal_field.value) };
+                }
+
                 slice_idx = 2;
             } else {
                 // free the second OrdinaryVar
@@ -77,6 +96,45 @@ pub fn bib_to_csl_json(
     }
 
     return items.toOwnedSlice();
+}
+
+/// only supports english month names for now
+fn bibtex_month_to_num(month: []const u8) !u8 {
+    var buf = [_]u8 { undefined } ** 50;
+    var allocator = std.heap.FixedBufferAllocator.init(buf[0..]);
+
+    const lowercased = try std.ascii.allocLowerString(
+        &allocator.allocator, month);
+    var result: u8 = undefined;
+    if (mem.startsWith(u8, lowercased, "jan")) {
+        result = 1;
+    } else if (mem.startsWith(u8, lowercased, "feb")) {
+        result = 2;
+    } else if (mem.startsWith(u8, lowercased, "mar")) {
+        result = 3;
+    } else if (mem.startsWith(u8, lowercased, "apr")) {
+        result = 4;
+    } else if (mem.startsWith(u8, lowercased, "may")) {
+        result = 5;
+    } else if (mem.startsWith(u8, lowercased, "jun")) {
+        result = 6;
+    } else if (mem.startsWith(u8, lowercased, "jul")) {
+        result = 7;
+    } else if (mem.startsWith(u8, lowercased, "aug")) {
+        result = 8;
+    } else if (mem.startsWith(u8, lowercased, "sep")) {
+        result = 9;
+    } else if (mem.startsWith(u8, lowercased, "oct")) {
+        result = 10;
+    } else if (mem.startsWith(u8, lowercased, "nov")) {
+        result = 11;
+    } else if (mem.startsWith(u8, lowercased, "dec")) {
+        result = 12;
+    } else {
+        return error.InvalidBibtexMonth;
+    }
+
+    return result;
 }
 
 
@@ -106,7 +164,7 @@ test "bib to csl" {
     );
     defer write_file.close();
 
-    try csl.write_items_json(alloc, csl_json, write_file.writer());
+    try csl.write_items_json(csl_json, write_file.writer());
 }
 
 pub fn bib_entry_to_csl_item(entry_type: bibtex.EntryType) !csl.ItemType {
@@ -472,33 +530,33 @@ pub fn set_bib_field_on_csl(
         // pdf,   // alias -> file
         .institution,
         .school,   // alias -> institution
-        => csl_prop = bib_field_extract_list(allocator, .publisher, .literal_list, field_data, copy_strings),
+        => csl_prop = try bib_field_extract_list(allocator, .publisher, .literal_list, field_data, copy_strings),
 
         // TODO 'jurisdiction' when type patent
         .location,
         .address,  // alias for location
-        => csl_prop = bib_field_extract_list(
+        => csl_prop = try bib_field_extract_list(
             allocator, .@"publisher-place", .literal_list, field_data, copy_strings),
 
         .organization,
-        => csl_prop = bib_field_extract_list(allocator, .publisher, .literal_list, field_data, copy_strings),
+        => csl_prop = try bib_field_extract_list(allocator, .publisher, .literal_list, field_data, copy_strings),
 
         .origlocation,
-        => csl_prop = bib_field_extract_list(
+        => csl_prop = try bib_field_extract_list(
             allocator, .@"original-publisher-place", .literal_list, field_data, copy_strings),
 
         .origpublisher,
-        => csl_prop = bib_field_extract_list(
+        => csl_prop = try bib_field_extract_list(
             allocator, .@"original-publisher", .literal_list, field_data, copy_strings),
 
         .publisher,
-        => csl_prop = bib_field_extract_list(allocator, .publisher, .literal_list, field_data, copy_strings),
+        => csl_prop = try bib_field_extract_list(allocator, .publisher, .literal_list, field_data, copy_strings),
 
         .pubstate,
-        => csl_prop = bib_field_extract_list(allocator, .status, .literal_list, field_data, copy_strings),
+        => csl_prop = try bib_field_extract_list(allocator, .status, .literal_list, field_data, copy_strings),
 
         .language,
-        => csl_prop = bib_field_extract_list(allocator, .language, .key_list, field_data, copy_strings),
+        => csl_prop = try bib_field_extract_list(allocator, .language, .key_list, field_data, copy_strings),
 
         // origlanguage,
         .pages,
@@ -537,7 +595,7 @@ pub fn set_bib_field_on_csl(
     try item_props.put(@tagName(csl_prop), csl_prop);
 }
 
-inline fn bib_field_extract_name_list(
+fn bib_field_extract_name_list(
     allocator: *std.mem.Allocator,
     comptime active_tag: std.meta.TagType(csl.Property),
     field_data: bibtex.FieldType,
@@ -563,13 +621,13 @@ inline fn bib_field_extract_name_list(
     return @unionInit(csl.Property, @tagName(active_tag), names.toOwnedSlice());
 }
 
-inline fn bib_field_extract_list(
+fn bib_field_extract_list(
     allocator: *std.mem.Allocator,
     comptime active_tag: std.meta.TagType(csl.Property),
     comptime active_field_tag: bibtex.FieldTypeTT,
     field_data: bibtex.FieldType,
     comptime copy_strings: bool,
-) csl.Property {
+) !csl.Property {
     // @field performs a field access base on a comptime-known string
     var list: []const []const u8 = @field(field_data, @tagName(active_field_tag)).values;
 
@@ -583,7 +641,7 @@ inline fn bib_field_extract_list(
         result.len = @ptrToInt(last.ptr) - @ptrToInt(result.ptr) + last.len;
     }
     if (copy_strings)
-        result = try maybe_copy_string(allocator, result, true);
+        result = try maybe_copy_string(allocator, true, result);
 
     // builtin that makes union init with a comptime known field/tag name possible
     return @unionInit(csl.Property, @tagName(active_tag), result);
@@ -592,11 +650,11 @@ inline fn bib_field_extract_list(
 inline fn maybe_copy_string(
     allocator: *std.mem.Allocator,
     comptime copy_strings: bool,
-    string: []const u8
+    string: []const u8,
 ) ![]const u8 {
     // dupe copies passed in slice to new memory that the caller then owns
     if (copy_strings) {
-        return try std.mem.Allocator.dupe(allocator, u8, id);
+        return try allocator.dupe(u8, string);
     } else {
         return string;
     }

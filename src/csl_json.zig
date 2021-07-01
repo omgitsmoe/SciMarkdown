@@ -354,7 +354,7 @@ pub const CitationItem = struct {
 // it is an array of Items
 // pub const CSLJsonMap = std.StringHashMap(Item);
 
-pub fn write_items_json(allocator: *std.mem.Allocator, items: []Item, out_stream: anytype) !void {
+pub fn write_items_json(items: []Item, out_stream: anytype) !void {
     try out_stream.writeByte('[');
     const len = items.len;
     for (items) |item, i| {
