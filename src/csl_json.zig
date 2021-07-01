@@ -17,6 +17,42 @@ pub const Item = struct {
             .optionals = PropertyMap.init(alloactor),
         };
     }
+
+    pub fn jsonStringify(
+        value: @This(),
+        options: std.json.StringifyOptions,
+        out_stream: anytype,
+    ) !void {
+        try out_stream.writeByte('{');
+
+        inline for (@typeInfo(@This()).Struct.fields) |Field, field_i| {
+            comptime {
+                if (std.mem.eql(u8, Field.name, "optionals")) {
+                    continue;
+                }
+            }
+
+            if (field_i != 0)
+                try out_stream.writeByte(',');
+
+            try std.json.stringify(Field.name, options, out_stream);
+            try out_stream.writeByte(':');
+            try std.json.stringify(@field(value, Field.name), options, out_stream);
+        }
+
+        if (value.optionals.count() > 0) {
+            try out_stream.writeByte(',');
+            var iter = value.optionals.iterator();
+            var i: u32 = 0;
+            while (iter.next()) |entry| : (i += 1) {
+                if (i > 0) try out_stream.writeByte(',');
+                try std.json.stringify(entry.key_ptr, options, out_stream);
+                try out_stream.writeByte(':');
+                try std.json.stringify(entry.value_ptr, options, out_stream);
+            }
+        }
+        try out_stream.writeByte('}');
+    }
 };
 pub const PropertyMap = std.StringHashMap(Property);
 
@@ -238,24 +274,8 @@ pub const DateVar = union(enum) {
         ) !void {
             try out_stream.writeByte('{');
 
-            // if (value.@"date-parts") |parts| {
-            //     try out_stream.writeAll("\"date-parts\":");
-            //     try out_stream.writeByte('[');
-            //     for (parts) |ord_arr, arr_i| {
-            //         if (arr_i != 0)
-            //             try out_stream.writeByte(',');
-            //         try std.json.stringify(ord_arr, options, out_stream);
-            //     }
-            //     try out_stream.writeByte(']');
-            // }
             // iterate over struct fields
             inline for (@typeInfo(@This()).Struct.fields) |Field, field_i| {
-                // comptime {
-                //     if (std.mem.eql(u8, Field.name, "date-parts")) {
-                //         continue;
-                //     }
-                // }
-
                 if (field_i != 0)
                     try out_stream.writeByte(',');
 
@@ -365,6 +385,7 @@ pub fn read_items_json(allocator: *std.mem.Allocator, input: []const u8) !CSLJso
     return parser.parse();
 }
 
+// TODO write csl json test
 test "read csl json" {
     const allocator = std.testing.allocator;
     const csljson =

@@ -6,6 +6,7 @@ const Parser = @import("parser.zig").Parser;
 const HTMLGenerator = @import("html.zig").HTMLGenerator;
 const CodeRunner = @import("code_chunks.zig").CodeRunner;
 const run_citeproc = @import("cite.zig").run_citeproc;
+const csl = @import("csl_json.zig");
 
 const clap = @import("zig-clap");
 
@@ -22,11 +23,13 @@ pub fn main() !void {
     const allocator = std.heap.page_allocator;
 
     // We can use `parseParam` to parse a string to a `Param(Help)`
+    @setEvalBranchQuota(2000);
     const params = comptime [_]clap.Param(clap.Help){
         clap.parseParam("-h, --help                       Display this help and exit.") catch unreachable,
         clap.parseParam("-o, --out <FILENAME>             Output filename.") catch unreachable,
         clap.parseParam("-r, --references <FILENAME>      Path to references file (BibLaTeX or CSL-JSON).") catch unreachable,
         clap.parseParam("-s, --citation-style <FILENAME>  Path to CSL file.") catch unreachable,
+        clap.parseParam("-l, --locale <LOCALE>  Specify locale as BCP 47 language tag.") catch unreachable,
         // clap.parseParam(
         //     "-s, --string <STR>...  An option parameter which can be specified multiple times.") catch unreachable,
         clap.parseParam("<IN-FILE>") catch unreachable,
@@ -107,6 +110,10 @@ pub fn main() !void {
     if (args.option("--citation-style")) |csl_fn| {
         csl_file = csl_fn;
     }
+    var csl_locale: ?[]const u8 = null;
+    if (args.option("--locale")) |csl_loc| {
+        csl_locale = csl_loc;
+    }
 
     var parser: Parser = try Parser.init(allocator, in_file);
     defer parser.deinit();
@@ -127,9 +134,27 @@ pub fn main() !void {
     }
 
     if (parser.citations.items.len > 0 and (ref_file != null or csl_file != null)) {
-        if (ref_file != null and csl_file != null) {
+        if (ref_file != null and csl_file != null and csl_locale != null) {
+
+            // read csl json file
+            const ref_file_fd = blk: {
+                if (std.fs.path.isAbsolute(ref_file.?)) {
+                    break :blk try std.fs.openFileAbsolute(ref_file.?, .{ .read = true, .write = false });
+                } else {
+                    break :blk try std.fs.cwd().openFile(ref_file.?, .{ .read = true, .write = false });
+                }
+            };
+            defer ref_file_fd.close();
+
+            // 20 MiB max
+            const ref_file_bytes = try ref_file_fd.readToEndAlloc(allocator, 20 * 1024 * 1024);
+            defer allocator.free(ref_file_bytes);
+            const csl_json_result = try csl.read_items_json(allocator, ref_file_bytes);
+            defer csl_json_result.arena.deinit();
+
             const bib_entries = try run_citeproc(
-                &parser.node_arena.allocator, parser.citations.items, ref_file.?, csl_file.?);
+                &parser.node_arena.allocator, parser.citations.items, csl_json_result.items,
+                csl_file.?, csl_locale.?);
             if (parser.bibliography) |bib| {
                 for (bib_entries) |entry| {
                     bib.append_child(entry);
@@ -138,7 +163,7 @@ pub fn main() !void {
         } else {
             log.warn(
                 "Both a references file (BibLaTeX or CSL-JSON) as well as CSL file " ++
-                "is needed to process citations!", .{});
+                "and a locale is needed to process citations!", .{});
         }
     }
 

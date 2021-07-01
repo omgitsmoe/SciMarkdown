@@ -6,7 +6,8 @@ const ast = @import("ast.zig");
 const NodeKind = ast.NodeKind;
 const Node = ast.Node;
 const TokenKind = @import("tokenizer.zig").TokenKind;
-const CitationItem = @import("csl_json.zig").CitationItem;
+const csl = @import("csl_json.zig");
+const CitationItem = csl.CitationItem;
 
 const builtin = @import("builtin.zig");
 const BuiltinCall = builtin.BuiltinCall;
@@ -179,8 +180,9 @@ fn nodes_from_formatted(
 pub fn run_citeproc(
     allocator: *std.mem.Allocator,
     cite_nodes: []*Node,
-    reference_file: []const u8,
-    csl_file: []const u8
+    references: []csl.Item,
+    csl_file: []const u8,
+    locale: []const u8,
 ) ![]*Node {
     // jgm/citeproc states that it takes either an array of Citation{} objects (json)
     // or an array of CitationItem arrays
@@ -195,6 +197,10 @@ pub fn run_citeproc(
     // },
     var citations = std.ArrayList([]const CitationItem).init(allocator);
     defer citations.deinit();
+    // TODO take ArenaAllocator as param and use child allocator here?
+    var ids = std.BufSet.init(allocator);
+    defer ids.deinit();
+
     for (cite_nodes) |cite| {
         if (cite.data.BuiltinCall.result) |result| {
             switch (result.*) {
@@ -214,13 +220,47 @@ pub fn run_citeproc(
                 .cites => |cites| try citations.append(cites),
                 else => unreachable,
             }
+
+            // add used citation ids for gathering references next
+            for (citations.items[citations.items.len - 1]) |citation| {
+                switch (citation.id) {
+                    .string => |str| try ids.insert(str),
+                    .number => |num| {
+                        // engough chars for a 64-bit number
+                        var buf: [20]u8 = undefined;
+                        const str = try std.fmt.bufPrint(buf[0..], "{}", .{ num });
+                        // BufSet copies the str so this is fine
+                        try ids.insert(str);
+                    },
+                }
+            }
         }
     }
+
+    var used_refs = std.ArrayList(csl.Item).init(allocator);
+    defer used_refs.deinit();
+    for (references) |ref| {
+        switch (ref.id) {
+            .string => |str| {
+                if (ids.contains(str))
+                    try used_refs.append(ref);
+            },
+            .number => |num| {
+                // engough chars for a 64-bit number
+                var buf: [20]u8 = undefined;
+                const str = try std.fmt.bufPrint(buf[0..], "{}", .{ num });
+                // BufSet copies the str so this is fine
+                if (ids.contains(str))
+                    try used_refs.append(ref);
+            },
+        }
+    }
+
     var to_citeproc = .{
         // citations = [[CitationItem, ..], [CitationItem, ..], ..]
         .citations = citations.items,
-        // TODO pass lang
-        .lang = "de-DE",
+        .references = used_refs.items,
+        .lang = locale,
     };
 
     // NOTE: excecutable has to be specified without extension otherwise it tries to
@@ -228,15 +268,13 @@ pub fn run_citeproc(
     // see: https://github.com/ziglang/zig/pull/2705 and https://github.com/ziglang/zig/pull/2770
     const cmd = &[_][]const u8{
         "citeproc", "--format=json",
-        "--references", reference_file,
         "--style", csl_file,
     };
 
-    log.debug("Cit commands: ", .{});
+    log.debug("Cite commands:", .{});
     for (cmd) |c| {
         log.debug("{s} ", .{ c });
     }
-    log.debug("\n", .{});
 
     var runner = try std.ChildProcess.init(cmd, allocator);
     defer runner.deinit();
@@ -248,6 +286,7 @@ pub fn run_citeproc(
     try runner.spawn();
 
     // write program code to stdin
+    // debug try std.json.stringify(to_citeproc, .{}, std.io.getStdOut().writer());
     try std.json.stringify(to_citeproc, .{}, runner.stdin.?.writer());
     runner.stdin.?.close();
     // has to be set to null otherwise the ChildProcess tries to close it again
@@ -257,8 +296,6 @@ pub fn run_citeproc(
     log.debug("Done writing to stdin!\n", .{});
 
     // might deadlock due to https://github.com/ziglang/zig/issues/6343
-    // weirdly only WindowsTerminal seems to have a problem with it and stops
-    // responding, cmd.exe works fine as does running it in a debugger
     const stdout = try runner.stdout.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
     defer allocator.free(stdout);
 
