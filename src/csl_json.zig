@@ -612,6 +612,7 @@ pub const CSLJsonParser = struct {
                     escaped = false;
                 } else if (b == '\\') {
                     escaped = true;
+                    continue;
                 }
                 strbuf.appendAssumeCapacity(b);
             }
