@@ -98,6 +98,7 @@ pub const Node = struct {
         Underline,
         Link: LinkData,
         // add SoftLineBreak ? are basically ignored and are represented by single \n
+        SoftLineBreak,
         HardLineBreak,
         Text: struct { text: []const u8 },
     };
@@ -324,7 +325,7 @@ pub inline fn is_leaf_block(self: NodeKind) bool {
 pub inline fn is_inline(self: NodeKind) bool {
     return switch (self) {
         .CodeSpan, .Emphasis, .StrongEmphasis, .Strikethrough, .Link,
-        .HardLineBreak, .Text, .Superscript, .Subscript, .MathInline => true,
+        .HardLineBreak, .SoftLineBreak, .Text, .Superscript, .Subscript, .MathInline => true,
         else => false,
     };
 }
@@ -346,7 +347,7 @@ pub inline fn can_hold(self: NodeKind, other: NodeKind) bool {
 pub inline fn children_allowed(self: NodeKind) bool {
     return switch (self) {
         .Undefined, .CodeSpan, .ThematicBreak, .LinkRef,
-        .BlankLine, .HardLineBreak, .Text, .MathInline => false,
+        .BlankLine, .HardLineBreak, .SoftLineBreak, .Text, .MathInline => false,
         else => true,
     };
 }

@@ -1001,15 +1001,15 @@ pub const Parser = struct {
 
         switch (self.peek_token().token_kind) {
             .Newline => {
-                self.eat_token();
-                // NOTE: migh encounter .Increase_indent here which might be followed
-                // by a Newline which should conunt as blank line
-                // paragraph will be close anyway due to parse_block's .Newline switch prong
-                if (self.peek_token().token_kind == TokenKind.Newline) {
-                    // don't eat Newline token of empty line
-                    // since need that to potentially close other blocks in parse_block
-                    try self.close_paragraph();
-                }
+                // we need the soft line break here to output a space (or w/e)
+                // between lines of the same paragraph that will end up being
+                // printed on the same line
+                var soft_line_break = try self.new_node(self.get_last_block());
+                soft_line_break.data = NodeKind.SoftLineBreak;
+                // text_node now can't continue anymore
+                self.last_text_node = null;
+
+                self.eat_token();  // \n
             },
             .Eof => try self.close_paragraph(),
             else => {},
@@ -1087,6 +1087,7 @@ pub const Parser = struct {
     }
 
     /// returns bool determining whether inline parsing should continue
+    /// NOTE(m): no .SoftLineBreak node will be created for the end_on_newline case!
     fn parse_inline(self: *Parser, comptime end_on_newline: bool) ParseError!bool {
         const token = self.peek_token();
         switch (token.token_kind) {
@@ -1094,6 +1095,7 @@ pub const Parser = struct {
                 if (end_on_newline) {
                     return false;
                 } else {
+                    // NOTE(m): no .SoftLineBreak node will be created for the end_on_newline case!
                     self.eat_token();
                     return true;
                 }

@@ -574,7 +574,7 @@ pub const Tokenizer = struct {
                     break :blk TokenKind.Builtin_call;
                 },
 
-                // assuming text (no keywords currently)
+                // assuming text (no keywords without leading symbol (e.g. @) currently)
                 else => blk: {
                     // consume everything that's not an inline style
                     while (self.peek_next_byte()) |next_byte| : (self.prechecked_advance_to_next_byte()) {

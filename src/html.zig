@@ -289,12 +289,12 @@ pub const HTMLGenerator = struct {
                     }
                 },
                 .HardLineBreak => try self.html_buf.appendSlice("<br/>\n"),
+                .SoftLineBreak => try self.html_buf.append('\n'),
                 .Text => |text| {
                     if (node_info.data.first_child) |fc| {
                         log.debug("Text node has child: {}\n", .{ fc.data });
                     }
                     try self.html_buf.appendSlice(text.text);
-                    try self.html_buf.append('\n');
                 },
                 else => continue,
             }
