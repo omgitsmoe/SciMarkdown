@@ -332,9 +332,11 @@ You can label the environment/block you're inside of by using the builtin `@labe
 
 ## Citations
 
+%% kwarg: pre for prefix, post for suffix, loc for locator, label
 Blah blah @cites(@cite(Seidel2018,   loc    =    pp. 33-35), @cite(Burt2018))
 
-Blah blah @cite(Schroeder91, loc=pp. 33-35\, 38-39 and *passim*).
+%% whitespace before an argument is ignored, to get a leading space escape it with a \
+Blah blah @cite(Schroeder91, loc=pp. 33-35\, 38-39 and *passim*, post=\ leading space).
 
 Omit author name: Carlsson says blah @cite(-Carlson1997).
 
@@ -342,6 +344,12 @@ In-text citation: @textcite(Pukkala1987) says blah.
 
 With locator: @textcite(Biging1992, loc=p. 33) says blah.
 %% error due to postional arg after kwarg: @textcite(Biging1992, loc=p. 33, error)
+
+%% This call will error, since nested calls of cite builtins (other than passing them
+%% directly to @cites) are not allowed
+%% Secondary citation: @cite(Roloff2014, post=zitiert nach @textcite(Roloff2018), loc=S. 147)
+%% -> workaround:
+Secondary citation: @cites(@cite(Roloff2014, loc=S. 147), @cite(Roloff2018, pre=zitiert nach Roloff (, post=\)))
 
 ## Bibliography
 

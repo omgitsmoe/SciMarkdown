@@ -1,6 +1,7 @@
 const std = @import("std");
 
 // zig gets polymorphism/generics by using compile time functions that return a type
+/// DFS Iterator that visits/emits Nodes twice, once on start and when closing/ending
 /// skip_start_wo_children: skips is_end=false NodeInfo for items without children
 pub fn DepthFirstIterator(
     comptime T: type,

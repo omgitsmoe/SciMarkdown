@@ -47,6 +47,7 @@ pub const Error = error {
     SyntaxError,
     ArgumentMismatch,
     InvalidArgument,
+    BuiltinNotAllowed,
 };
 
 // anytype means we can pass anonymous structs like: .{ .parser = self, .. }
@@ -62,6 +63,11 @@ pub fn evaluate_builtin(
     data: anytype
 ) Error!BuiltinResult {
     var result: BuiltinResult = undefined;
+    // NOTE: theoretically builtins using results of other arbitrary builtins are allowed
+    // under the condition that the builtin can be __fully__ evaluated directly (without
+    // having to e.g. wait for citeproc to process it; e.g. using @textcite as post kwarg
+    // for @cite would thus not work since the post kwarg has to be sent to citeproc, but
+    // the value is not known yet until citeproc is run etc..
     switch (builtin_type) {
         .cite => {
             result = .{
@@ -88,8 +94,7 @@ pub fn evaluate_builtin(
                             // .cite and .textcite nodes will have been evaluated already
                             // just use the resul ptr
                             .cite => {
-                                try citations.append(
-                                    try evaluate_builtin_cite(next.first_child.?, .cite, .{}));
+                                try citations.append(call.result.?.cite);
                             },
                             .textcite => {
                                 // TODO compiler stuck in an infinite loop
@@ -99,9 +104,9 @@ pub fn evaluate_builtin(
                                 //     allocator, next.first_child.?, .textcite, .{});
                                 // try citations.append(tc.textcite[0]);
                                 // try citations.append(tc.textcite[1]);
-                                const tc = try evaluate_builtin_textcite(next.first_child.?, .textcite, .{});
-                                try citations.append(tc[0]);
-                                try citations.append(tc[1]);
+                                const tc_result = call.result.?;
+                                try citations.append(tc_result.textcite[0]);
+                                try citations.append(tc_result.textcite[1]);
                             },
                             else => {
                                 log.err(
@@ -183,6 +188,8 @@ pub fn evaluate_builtin_textcite(
     builtin_type: BuiltinCall,
     data: anytype
 ) Error![2]csl.CitationItem {
+    // TODO fix kwargs on textcite since we use two separate cites to emulate a real textcite
+    // the pre/post/etc get printed twice
     var cite_author_only = try evaluate_builtin_cite(builtin_node, .textcite, data);
     var cite_no_author: csl.CitationItem = cite_author_only;
 
@@ -234,6 +241,23 @@ pub fn evaluate_builtin_cite(
                     .{ @tagName(builtin_type) });
                 log.debug("Other data: {}\n", .{ next.data });
                 return Error.ArgumentMismatch;
+            }
+
+            // check that no there are no other cite calls that we depend on
+            var mb_current: ?*ast.Node = next;
+            while (mb_current) |current| : (mb_current = current.dfs_next()) {
+                if (current.data == .BuiltinCall) {
+                    switch (current.data.BuiltinCall.builtin_type) {
+                        .cite, .textcite, .cites => {
+                            // TODO: @Improvement include starting token in ast.Node
+                            // so we can inlcude line_nr when error reporting?
+                            log.err("Nested calls to cite " ++
+                                    "builtins are not allowed!", .{});
+                            return Error.BuiltinNotAllowed;
+                        },
+                        else => {},
+                    }
+                }
             }
 
             if (std.mem.eql(u8, next.data.KeywordArg.keyword, "pre")) {

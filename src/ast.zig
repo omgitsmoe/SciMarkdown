@@ -92,7 +92,6 @@ pub const Node = struct {
         Strikethrough,
         Superscript,
         Subscript,
-        // TODO add syntax
         SmallCaps,
         // TODO add syntax?
         Underline,
@@ -101,6 +100,40 @@ pub const Node = struct {
         SoftLineBreak,
         HardLineBreak,
         Text: struct { text: []const u8 },
+
+        pub fn print(self: *@This()) void {
+            const uT = @typeInfo(@This()).Union;
+            inline for (uT.fields) |union_field, enum_i| {
+                // check for active tag
+                if (enum_i == @enumToInt(self.*)) {
+                    std.debug.print("{s}{{ ", .{ @tagName(self.*) });
+                    // the union_field is only the active union variant like BuiltinCall or CodeSpan etc.
+                    // iter over actual payload type fields (assuming it's a struct)
+                    switch (@typeInfo(union_field.field_type)) {
+                        .Struct => |fT| {
+                            inline for (fT.fields) |ft_field, ft_enum| {
+                                std.debug.print(".{s} = ", .{ ft_field.name });
+                                // print as str if type is []const u8
+                                // necessary due to zig's recent change to just print []u8 as actual u8
+                                // unless explicitly specified as {s}, which means every []u8 has
+                                // to specified manually with {s} which is a pain in nested structs etc.
+                                if (ft_field.field_type == []const u8) {
+                                    std.debug.print("'{s}', ",
+                                        .{ @field(@field(self, union_field.name), ft_field.name) });
+                                } else {
+                                    std.debug.print("{any}, ",
+                                        .{ @field(@field(self, union_field.name), ft_field.name) });
+                                }
+                            }
+                        },
+                        .Void => {},
+                        else => {},
+                    }
+                }
+
+            }
+            std.debug.print("}}\n", .{});
+        }
     };
 
     pub inline fn create(allocator: *std.mem.Allocator) !*Node {
@@ -207,7 +240,110 @@ pub const Node = struct {
             mb_next = next.next;
         }
     }
+
+    pub fn print_tree(self: *Node) void {
+        var level: i16 = 0;
+        var mb_current: ?*Node = self;
+        while (mb_current) |current| {
+            // print node
+            var indent_count: u8 = 0;
+            while (indent_count < level) : (indent_count += 1) {
+                if (level - 1 == indent_count) {
+                    std.debug.print("|-", .{});
+                } else {
+                    std.debug.print("  ", .{});
+                }
+            }
+            current.data.print();
+
+            const result = current.dfs_next_lvl();
+            mb_current = result.next;
+            level += result.lvl_delta;
+        }
+    }
+    
+    /// contrary to utils.DepthFirstIterator this iterator does not visit
+    /// nodes twice (start/end)
+    pub fn dfs_next(self: *@This()) ?*Node {
+        var nxt: ?*@This() = null;
+        if (self.first_child) |child| {
+            nxt = child;
+        } else if (self.next) |sibling| {
+            nxt = sibling;
+        } else if (self.parent) |parent| {
+            nxt = parent.next;
+        }
+
+        return nxt;
+    }
+
+    pub fn dfs_next_lvl(self: *@This()) struct { next: ?*Node, lvl_delta: i8 } {
+        var nxt: ?*@This() = null;
+        var delta: i8 = 0;
+        if (self.first_child) |child| {
+            nxt = child;
+            delta = 1;
+        } else if (self.next) |sibling| {
+            nxt = sibling;
+        } else if (self.parent) |parent| {
+            nxt = parent.next;
+            delta = -1;
+        }
+
+        return .{ .next = nxt, .lvl_delta = delta };
+    }
 };
+
+test "dfs next" {
+    const alloc = std.testing.allocator;
+
+    var parent = try Node.create(alloc);
+    defer alloc.destroy(parent);
+
+    var child1 = try Node.create(alloc);
+    defer alloc.destroy(child1);
+    parent.append_child(child1);
+
+    var child2 = try Node.create(alloc);
+    defer alloc.destroy(child2);
+    parent.append_child(child2);
+
+    var child1child1 = try Node.create(alloc);
+    defer alloc.destroy(child1child1);
+    child1.append_child(child1child1);
+    var child1child2 = try Node.create(alloc);
+    defer alloc.destroy(child1child2);
+    child1.append_child(child1child2);
+    var child1child1child1 = try Node.create(alloc);
+    defer alloc.destroy(child1child1child1);
+    child1child1.append_child(child1child1child1);
+
+    try expect(parent.dfs_next().? == child1);
+    try expect(child1.dfs_next().? == child1child1);
+    try expect(child1child1.dfs_next().? == child1child1child1);
+    try expect(child1child1child1.dfs_next().? == child1child2);
+    try expect(child1child2.dfs_next().? == child2);
+
+    const order = [6]*Node{
+        parent, child1, child1child1, child1child1child1, child1child2, child2 };
+    var mb_current: ?*Node = parent;
+    var i: usize = 0;
+    while (mb_current) |current| : ({ i += 1; mb_current = current.dfs_next(); }) {
+        try expect(current == order[i]);
+    }
+
+    // with level
+    try expect(parent.dfs_next_lvl().next.? == child1);
+    try expect(parent.dfs_next_lvl().lvl_delta == 1);
+    try expect(child1.dfs_next_lvl().next.? == child1child1);
+    try expect(child1.dfs_next_lvl().lvl_delta == 1);
+    try expect(child1child1.dfs_next_lvl().next.? == child1child1child1);
+    try expect(child1child1.dfs_next_lvl().lvl_delta == 1);
+    try expect(child1child1child1.dfs_next_lvl().next.? == child1child2);
+    try expect(child1child1child1.dfs_next_lvl().lvl_delta == -1);
+    try expect(child1child2.dfs_next_lvl().next.? == child2);
+    try expect(child1child2.dfs_next_lvl().lvl_delta == -1);
+}
 
 test "node remove_child first_child of 3" {
     const alloc = std.testing.allocator;

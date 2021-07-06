@@ -529,7 +529,7 @@ pub const Parser = struct {
                 const require_extra_newline = if (tok_kind == .Builtin_call) true else false;
                 while (true) : ( tok_kind = self.peek_token().token_kind ) {
                     if (tok_kind == .Builtin_call) {
-                        try self.parse_builtin(self.peek_token(), null);
+                        try self.parse_builtin(self.peek_token());
                         try self.require_token(
                             .Newline, " after builtin call before the code of a FencedCode block!");
                         self.eat_token();
@@ -1256,7 +1256,7 @@ pub const Parser = struct {
                 try self.parse_link();
             },
             TokenKind.Builtin_call => {
-                try self.parse_builtin(token, null);
+                try self.parse_builtin(token);
             },
             else => {
                 try self.parse_text(token, self.get_last_block());
@@ -1515,18 +1515,43 @@ pub const Parser = struct {
         log.debug("Link dest: {}\n", .{ link_or_ref.data });
     }
 
-    fn parse_builtin(self: *Parser, start_token: *const Token, parent: ?*Node) ParseError!void {
+    inline fn skip_after_param(self: *Parser) !void {
+        // we either need a after_pos_param state (which would mean
+        // after_kw_param is needed as well) or we can skip all whitespace
+        // till we hit the comma
+        // TODO iterator? that erros on eof
+        while (true) {
+            tok = self.peek_token();
+            switch (tok.token_kind) {
+                .Comma, .Close_paren => {
+                    state = .in_pos_param;  // so ',' gets treated as finisher
+                    break;
+                },
+                .Space, .Tab => {},
+                else => {
+                    Parser.report_error(
+                        "ln:{}: Hit '{s}' while waiting for param delimiter ','" ++
+                        " or call closer ')' when parsing a builtin call!\n",
+                        .{ start_token.line_nr, tok.token_kind.name() });
+                    return ParseError.SyntaxError;
+                },
+            }
+            self.eat_token();
+        }
+    }
+
+    fn parse_builtin(self: *Parser, start_token: *const Token) ParseError!void {
         self.eat_token();  // eat start_token
         try self.require_token(
             .Open_paren, ". Calling a builtin should look like: @builtin(arg, kwarg=..)\n");
         self.eat_token();
         
-        var builtin = try self.new_node(if (parent) |par| par else self.get_last_block());
+        var builtin = try self.new_node(self.get_last_block());
 
         // start + 1 since the @ is included
         const keyword = self.tokenizer.bytes[start_token.start + 1..start_token.end];
         const mb_builtin_type = std.meta.stringToEnum(BuiltinCall, keyword);
-        log.debug("Builtin type: {}\n", .{ mb_builtin_type });
+        log.debug("Builtin type: {}", .{ mb_builtin_type });
         if (mb_builtin_type) |bi_type| {
             builtin.data = .{
                 .BuiltinCall = .{ .builtin_type = bi_type }
@@ -1537,10 +1562,11 @@ pub const Parser = struct {
                 .{ start_token.line_nr, keyword });
             return ParseError.SyntaxError;
         }
+        self.open_block(builtin);
 
         var current_arg = try self.new_node(builtin);
         current_arg.data = .PostionalArg;
-        log.debug("Parsing builtin\n", .{});
+        self.open_block(current_arg);
 
         const State = enum {
             next_pos_param,
@@ -1571,34 +1597,9 @@ pub const Parser = struct {
                             last_end += 1;
                             self.eat_token();
                         },
-                        .Builtin_call => {
-                            try self.parse_builtin(tok, current_arg);
-                            // we either need a after_pos_param state (which would mean
-                            // after_kw_param is needed as well) or we can skip all whitespace
-                            // till we hit the comma
-                            // TODO iterator? that erros on eof
-                            while (true) {
-                                tok = self.peek_token();
-                                switch (tok.token_kind) {
-                                    .Comma, .Close_paren => {
-                                        state = .in_pos_param;  // so ',' gets treated as finisher
-                                        break;
-                                    },
-                                    .Space, .Tab => {},
-                                    else => {
-                                        Parser.report_error(
-                                            "ln:{}: Hit '{s}' while waiting for param delimiter ','" ++
-                                            " or call closer ')' when parsing a builtin call!\n",
-                                            .{ start_token.line_nr, tok.token_kind.name() });
-                                        return ParseError.SyntaxError;
-                                    },
-                                }
-                                self.eat_token();
-                            }
-                        },
                         else => {
                             state = .in_pos_param;
-                            try self.parse_text(tok, current_arg);  // eats the tok
+                            _ = try self.parse_inline(true);  // eats the tok
                             last_non_space = tok.end;
                         },
                     }
@@ -1609,30 +1610,9 @@ pub const Parser = struct {
                             last_end += 1;
                             self.eat_token();
                         },
-                        .Builtin_call => {
-                            try self.parse_builtin(tok, current_arg);
-                            while (true) {
-                                tok = self.peek_token();
-                                switch (tok.token_kind) {
-                                    .Comma, .Close_paren => {
-                                        state = .in_kw_param;  // so ',' gets treated as finisher
-                                        break;
-                                    },
-                                    .Space, .Tab => {},
-                                    else => {
-                                        Parser.report_error(
-                                            "ln:{}: Hit '{s}' while waiting for param delimiter ','" ++
-                                            " or call closer ')' when parsing a builtin call!\n",
-                                            .{ start_token.line_nr, tok.token_kind.name() });
-                                        return ParseError.SyntaxError;
-                                    },
-                                }
-                                self.eat_token();
-                            }
-                        },
                         else => {
                             state = .in_kw_param;
-                            try self.parse_text(tok, current_arg);  // eats the tok
+                            _ = try self.parse_inline(true);  // eats the tok
                         },
                     }
                 },
@@ -1649,14 +1629,16 @@ pub const Parser = struct {
 
                             // delete text node that was created as the first param
                             // TODO maybe force to use double quotes?
+                            // TODO this is error prone @Improve
+                            //      (additionally make new_node set this to null?)
                             self.last_text_node = null;
                             current_arg.delete_direct_children(&self.node_arena.allocator);
                             self.eat_token();
                         },
                         .Comma => {
                             log.debug(
-                                "ln:{}: Finished arg: {s}\n", .{ start_token.line_nr, current_arg.data });
-                            current_arg.print_direct_children();
+                                "ln:{}: Finished arg: {s}", .{ start_token.line_nr, current_arg.data });
+                            self.close_last_block();
 
                             state = .next_pos_param;
 
@@ -1666,11 +1648,9 @@ pub const Parser = struct {
 
                             current_arg = try self.new_node(builtin);
                             current_arg.data = .PostionalArg;
+                            self.open_block(current_arg);
 
                             self.eat_token();
-                        },
-                        .Space, .Tab => {
-                            try self.parse_text(tok, current_arg);  // eats the tok
                         },
                         .Newline => {
                             Parser.report_error(
@@ -1678,9 +1658,14 @@ pub const Parser = struct {
                                 .{ tok.line_nr });
                             return ParseError.SyntaxError;
                         },
-                        // TODO handle and mb allow .Builtin_call? same for in_kw_param
+                        .Space, .Tab => {
+                            // treat this as a special case since we might encounter an
+                            // = which would make this a kw param meaning we'd have to remember
+                            // the last_non_space properly
+                            _ = try self.parse_inline(true);  // eats the tok
+                        },
                         else => {
-                            try self.parse_text(tok, current_arg);  // eats the tok
+                            _ = try self.parse_inline(true);  // eats the tok
                             last_non_space = tok.end;
                         }
                     }
@@ -1693,7 +1678,8 @@ pub const Parser = struct {
                         },
                         .Text, .Underscore => {
                             state = .in_kw;
-                            try self.parse_text(tok, current_arg);  // eats the tok
+                            // TODO is this needed? try self.parse_text(tok, current_arg);  // eats the tok
+                            self.eat_token();
                         },
                         else => {
                             Parser.report_error(
@@ -1708,6 +1694,13 @@ pub const Parser = struct {
                         .Space, .Tab, .Newline => {
                             state = .after_kw;
 
+                            current_arg.data.KeywordArg.keyword =
+                                self.tokenizer.bytes[last_end..tok.start];
+                            last_end = tok.end;
+                            self.eat_token();
+                        },
+                        .Equals => {
+                            state = .next_kw_param;
                             current_arg.data.KeywordArg.keyword =
                                 self.tokenizer.bytes[last_end..tok.start];
                             last_end = tok.end;
@@ -1742,8 +1735,8 @@ pub const Parser = struct {
                     switch (tok.token_kind) {
                         .Comma => {
                             log.debug(
-                                "ln:{}: Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
-                            current_arg.print_direct_children();
+                                "ln:{}: Finished arg: {}", .{ start_token.line_nr, current_arg.data });
+                            self.close_last_block();
 
                             state = .next_kw;
                             last_end = tok.end;
@@ -1751,6 +1744,7 @@ pub const Parser = struct {
                             self.last_text_node = null;
 
                             current_arg = try self.new_node(builtin);
+                            self.open_block(current_arg);
                             current_arg.data = .{
                                 .KeywordArg = .{
                                     .keyword = undefined,
@@ -1765,8 +1759,7 @@ pub const Parser = struct {
                                 .{ tok.line_nr });
                             return ParseError.SyntaxError;
                         },
-                        // TODO handle and mb allow .Builtin_call? same for in_kw_param
-                        else => try self.parse_text(tok, current_arg),  // eats the tok
+                        else => _ = try self.parse_inline(true),  // eats the tok
                     }
                 },
             }
@@ -1787,22 +1780,29 @@ pub const Parser = struct {
             .next_kw, .next_pos_param,  // ignore extra comma e.g. @kw(abc, def,)
             .in_pos_param, .in_kw_param => {
                 self.last_text_node = null;
+                self.close_last_block();  // arg
+                std.debug.assert(self.get_last_block().data == .BuiltinCall);
+                self.close_last_block();  // builtin node
+
                 switch (state) {
                     .in_pos_param => pos_params += 1,
                     .in_kw_param => kw_params += 1,
                     else => {},
                 }
-                log.debug("ln:{}: LAST Finished arg: {}\n", .{ start_token.line_nr, current_arg.data });
-                current_arg.print_direct_children();
+                log.debug("ln:{}: LAST Finished arg: {}", .{ start_token.line_nr, current_arg.data });
             },
         }
+        // TODO inline blocks now allowed as arguments, when they're used with cite builtins
+        // or with nested builtins they won't be respected / or we will crash
+        // @CleanUp
 
         self.eat_token();  // eat )
 
         log.debug(
-            "ln:{}: Finished builtin: {s} pos: {}, kw: {}\n",
+            "ln:{}: Finished builtin: {s} pos: {}, kw: {}",
             .{ start_token.line_nr, self.tokenizer.bytes[start_token.start..start_token.end],
                pos_params, kw_params });
+        builtin.print_tree();
 
         const bc_info = builtin_call_info[@enumToInt(mb_builtin_type.?)];
         if (bc_info.pos_params >= 0 and pos_params != bc_info.pos_params) {
@@ -1817,39 +1817,35 @@ pub const Parser = struct {
             return ParseError.SyntaxError;
         }
 
-        // only evaluate top level call
-        if (parent == null) {
-            const result = bic.evaluate_builtin(
-                &self.node_arena.allocator, builtin, mb_builtin_type.?, .{}) catch {
-                return ParseError.BuiltinCallFailed;
-            };
-            switch (result) {
-                .cite, .textcite, .cites => {
-                    // save the result in the node if we're the top level call
-                    const persistent = try self.allocator.create(bic.BuiltinResult);
-                    persistent.* = result;
-                    builtin.data.BuiltinCall.result = persistent;
+        const result = bic.evaluate_builtin(
+            &self.node_arena.allocator, builtin, mb_builtin_type.?, .{}) catch {
+            return ParseError.BuiltinCallFailed;
+        };
+        switch (result) {
+            .cite, .textcite, .cites => {
+                // save the result in the node if we're the top level call
+                const persistent = try self.allocator.create(bic.BuiltinResult);
+                persistent.* = result;
+                builtin.data.BuiltinCall.result = persistent;
 
-                    // store citation nodes for passing them to citeproc and replacing them
-                    // with actual citation nodes
-                    try self.citations.append(builtin);
-                },
-                .bibliography => {
-                    if (self.bibliography) |bib_node| {
-                        Parser.report_error("Only one bibliography allowed currently!\n", .{});
-                        return ParseError.SyntaxError;
-                    }
+                // store citation nodes for passing them to citeproc and replacing them
+                // with actual citation nodes
+                try self.citations.append(builtin);
+            },
+            .bibliography => {
+                if (self.bibliography) |bib_node| {
+                    Parser.report_error("Only one bibliography allowed currently!\n", .{});
+                    return ParseError.SyntaxError;
+                }
 
-                    self.bibliography = result.bibliography;
-                },
-                .label => {
-                    const persistent = try self.allocator.create(bic.BuiltinResult);
-                    persistent.* = result;
-                    builtin.data.BuiltinCall.result = persistent;
-                },
-                else => {},
-            }
-
+                self.bibliography = result.bibliography;
+            },
+            .label => {
+                const persistent = try self.allocator.create(bic.BuiltinResult);
+                persistent.* = result;
+                builtin.data.BuiltinCall.result = persistent;
+            },
+            else => {},
         }
     }
 };
