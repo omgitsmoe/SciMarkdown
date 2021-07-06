@@ -1,6 +1,8 @@
 const std = @import("std");
 const log = std.log;
 
+const utils = @import("utils.zig");
+
 const tokenizer = @import("tokenizer.zig");
 const Tokenizer = tokenizer.Tokenizer;
 const Token = tokenizer.Token;
@@ -488,7 +490,8 @@ pub const Parser = struct {
                     try self.require_token(TokenKind.Space, " after ordered list item starter!");
                     self.eat_token();
                     try self.parse_ordered_list(
-                        next_token_kind, start_token.column, prev_line_blank, start_num, '1');
+                        next_token_kind, start_token.column, prev_line_blank, start_num,
+                        '1', utils.uintDigits(start_num));
                 } else {
                     try self.parse_paragraph(prev_line_blank);
                 }
@@ -729,7 +732,7 @@ pub const Parser = struct {
                             self.eat_token();
                             try self.parse_ordered_list(
                                 next_token.token_kind, start_token.column,
-                                prev_line_blank, start_num, ol_type);
+                                prev_line_blank, start_num, ol_type, 1);
                         } else {
                             try self.parse_paragraph(prev_line_blank);
                         }
@@ -769,7 +772,7 @@ pub const Parser = struct {
                     }
                 },
                 .OrderedListItem => |item| {
-                    if (item.indent + 3 != starter_column) {
+                    if (item.indent + item.li_starter_len + 2 != starter_column) {
                         self.close_blocks_until_kind(.OrderedListItem, false);
                         self.close_list(prev_line_blank);
                         // prev_line_blank gets "used up" by the first list
@@ -915,16 +918,20 @@ pub const Parser = struct {
         prev_line_blank: bool,
         start_num: u16,
         ol_type: u8,  // 1, a, A, i or I
+        ol_digits: u8,
     ) ParseError!void {
         try self.handle_open_blocks(NodeKind.OrderedListItem, start_column, prev_line_blank);
 
         var list_node: *Node = undefined;
         // create new list if it can't continue
         if (!self.can_list_continue(
-                NodeKind.OrderedListItem, start_token_kind, start_column, prev_line_blank, ol_type)) {
+                NodeKind.OrderedListItem, start_token_kind, start_column,
+                prev_line_blank, ol_type)) {
             list_node = try self.new_node(self.get_last_block());
             list_node.data = .{
-                .OrderedList = .{ .blank_lines = 0, .start_num = start_num, .ol_type = ol_type },
+                .OrderedList = .{
+                    .blank_lines = 0, .start_num = start_num, .ol_type = ol_type
+                },
             };
             self.open_block(list_node);
         } else {
@@ -938,6 +945,7 @@ pub const Parser = struct {
                 .list_item_starter = start_token_kind,
                 .indent = start_column,
                 .ol_type = ol_type,
+                .li_starter_len = ol_digits,
             },
         };
         self.open_block(list_item_node);

@@ -1,4 +1,5 @@
 const std = @import("std");
+const expect = std.testing.expect;
 
 // zig gets polymorphism/generics by using compile time functions that return a type
 /// DFS Iterator that visits/emits Nodes twice, once on start and when closing/ending
@@ -149,6 +150,88 @@ pub fn unionSetPayload(comptime T: type, union_ptr: anytype, value: T) void {
     } else {
         unreachable;
     }
+}
+
+pub inline fn intDigits(x: anytype) !u8 {
+    const T = @TypeOf(x);
+    const tT = @typeInfo(T);
+    comptime std.debug.assert(tT == .Int);
+    comptime if (tT.Int.signedness == .unsigned) @compileError("Use uintDigits instead!");
+    comptime if (tT.Int.bits > 64) @compileError("Only integers up to 64bits are implemented!");
+
+    const abs_x = try std.math.absInt(x);
+    comptime var uT = tT;
+    // change type info to an unsigned integer with the same bit count
+    uT.Int.signedness = .unsigned;
+    // use bitCast to cast to unsigned which works due to twos complement
+    // Docs for @bitCast: "Convert i32 to u32 preserving twos complement"
+    //
+    // use @Type(uT) to convert the modified typeInfo back to a type that we can use
+    // @compileLog("Using ", @typeName(@Type(uT)), " for ", @typeName(T) );
+    // -> *"Using ", *"u29", *" for ", *"i29"
+    return uintDigits(@bitCast(@Type(uT), abs_x));
+}
+
+pub fn uintDigits(x: anytype) u8 {
+    const T = @TypeOf(x);
+    const tT = @typeInfo(T);
+    comptime std.debug.assert(tT == .Int);
+    comptime std.debug.assert(tT.Int.signedness == .unsigned);
+    comptime if (tT.Int.bits > 64) @compileError("Only integers up to 64bits are implemented!");
+
+    if (x < 10)                     return 1;
+    if (x < 100)                    return 2;
+    if (x < 1000)                   return 3;
+    if (x < 10000)                  return 4;
+    if (x < 100000)                 return 5;
+    if (x < 1000000)                return 6;
+    if (x < 10000000)               return 7;
+    if (x < 100000000)              return 8;
+    if (x < 1000000000)             return 9;
+    if (x < 10000000000)            return 10;  // 32bit
+    if (x < 100000000000)           return 11;
+    if (x < 1000000000000)          return 12;
+    if (x < 10000000000000)         return 13;
+    if (x < 100000000000000)        return 14;
+    if (x < 1000000000000000)       return 15;
+    if (x < 10000000000000000)      return 16;
+    if (x < 100000000000000000)     return 17;
+    if (x < 1000000000000000000)    return 18;
+    if (x < 10000000000000000000)   return 19;
+
+    return 20;  // 64bit
+}
+
+test "uintDigits" {
+    var x: u13 = 4736;
+    try expect(uintDigits(x) == 4);
+
+    var y: u32 = 2004234;
+    try expect(uintDigits(y) == 7);
+
+    var z: u64 = 18446744073709551615;
+    try expect(uintDigits(z) == 20);
+
+    // TODO test compileError once implemented
+    // https://github.com/ziglang/zig/issues/513
+}
+
+test "intDigits" {
+    var x: i14 = -4736;
+    try expect((try intDigits(x)) == 4);
+
+    var y: i32 = 2004234;
+    try expect((try intDigits(y)) == 7);
+
+    var z: i64 = -9223372036854775807;
+    try expect((try intDigits(z)) == 19);
+
+    // overflow error
+    var w: i64 = -9223372036854775808;
+    try std.testing.expectError(error.Overflow, intDigits(w));
+
+    // TODO test compileError once implemented
+    // https://github.com/ziglang/zig/issues/513
 }
 
 /// all of the string is_.. functions are ascii only!!

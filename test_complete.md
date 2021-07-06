@@ -82,6 +82,8 @@ This is a normal paragraph %% and this is a comment
 1. Actual numbers don't matter, just that it's a number
    continue
    12. But the first number of an ordered list determines the start number!
+   - test
+     - testtest
 4. And another item.
 
    %% blank line above will make this a loose list -> every list item starts a paragraph
@@ -232,6 +234,11 @@ plt.ylabel('some numbers')
 print("second print")
 ```
 
+%% TODO output error
+```python
+a = 5 + 'a'
+```
+
 Python inline: >`py print("printed from within python")`
 
 ```r
@@ -288,6 +295,25 @@ raw Markdown line up prettily. You can also use inline Markdown.
 | --- | --- | ---
 | *Still* | `renders` | **nicely**
 | 1 | 2 | 3
+
+%% +------------------------+------------+----------+----------+
+%% | Header row, column 1   | Header 2   | Header 3 | Header 4 |
+%% | (header rows optional) |            |          |          |
+%% +========================+============+==========+==========+
+%% | body row 1, column 1   | column 2   | column 3 | column 4 |
+%% +------------------------+------------+----------+----------+
+%% | body row 2             | Cells may span columns.          |
+%% +------------------------+------------+---------------------+
+%% | body row 3             | Cells may  | - Table cells       |
+%% +------------------------+ span rows. | - contain           |
+%% | body row 4             |            | - body elements.    |
+%% +------------------------+------------+---------------------+
+%% 
+%% +------------------------------+------------+
+%% | First column header spanning | Column 3   |
+%% | two rows                     |            |
+%% +==============================+============+
+%% | test rworwo
 
 
 **Inline HTML removed in this markdown style!**

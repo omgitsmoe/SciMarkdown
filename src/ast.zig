@@ -33,7 +33,13 @@ pub const Node = struct {
     ///         1. test
     ///           - sublist
     ///           ^ this is the indent of the sublist
-    pub const ListItemData = struct { list_item_starter: TokenKind, indent: u16, ol_type: u8 };
+    // we also need to store the list item starter length (due to ordered list item
+    // starters being variable)
+    pub const ListItemData = struct { list_item_starter: TokenKind, indent: u16,
+                                      //           nr of digits for ol li, otherwise 1
+                                      //           (only the immediate token length,
+                                      //            not including '.' or ')')
+                                      ol_type: u8, li_starter_len: u8 = 1 };
     pub const CitationData = struct { id: []const u8 };
 
     // tagged union
