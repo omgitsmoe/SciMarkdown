@@ -747,7 +747,7 @@ pub const Parser = struct {
     }
 
     /// closes lists that don't match the current token's ident level
-    /// (token.column == list.indent + (2 unordered | 3 ordered))
+    /// (token.column == list.indent + (2 unordered | li_starter_len + 2 ordered))
     fn close_lists_not_matching_indent(
         self: *Parser,
         initial_last_container: Node.NodeData,
@@ -813,10 +813,17 @@ pub const Parser = struct {
             last_block_kind = self.get_last_block().data;
         }
 
-        var last_container: Node.NodeData = self.get_last_container_block().data;
-        if (last_container != new_block) {
-            self.close_lists_not_matching_indent(last_container, starter_column, initial_prev_line_blank);
-            last_block_kind = self.get_last_block().data;
+        switch (new_block) {
+            // not necessary for lists, that is handled by can_list_continue
+            // since new_block is comptime this switch should not incur any runtime cost
+            .UnorderedListItem, .OrderedListItem, .OrderedList, .UnorderedList => {},
+            else => {
+                var last_container: Node.NodeData = self.get_last_container_block().data;
+                if (last_container != new_block) {
+                    self.close_lists_not_matching_indent(last_container, starter_column, initial_prev_line_blank);
+                    last_block_kind = self.get_last_block().data;
+                }
+            }
         }
 
         // otherwise check that old can hold new block kind

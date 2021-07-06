@@ -67,7 +67,7 @@ H~2~O is a liquid.  2^10^ is 1024.
 
 %% This is a comment
 
-This is a normal paragraph %% and this is a comment
+This is a normal paragraph, nothing to see here! %% and this is a comment
 
 
 ## Lists
@@ -78,12 +78,16 @@ This is a normal paragraph %% and this is a comment
    but this will still be rendered on one line
 2. Another item
    - Unordered sub-list.
-   %% :[ref]: (test)
 1. Actual numbers don't matter, just that it's a number
    continue
+   %% since SciMarkdown enforces exactly one space after a list item starter
+   %% the line below will only continue if it also is on the same column
+   %% exactly one space after the list item starter!
    12. But the first number of an ordered list determines the start number!
-   - test
-     - testtest
+       Line continues
+   123. Should be 13.
+        Line continues
+   34659. Should be 14.
 4. And another item.
 
    %% blank line above will make this a loose list -> every list item starts a paragraph
@@ -117,7 +121,7 @@ This is a normal paragraph %% and this is a comment
 - Dropping two indents
 
 1. ordered
-a. Ordered lists can also be started with a single letter of 'a'-'z' or 'A'-'Z'
+a. Ordered lists can also be started with a single letter of a-z or A-Z
 b. next
 A. Other list
    A. Other sublist
