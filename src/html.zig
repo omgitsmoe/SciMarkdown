@@ -224,6 +224,7 @@ pub const HTMLGenerator = struct {
                     }
                 },
                 .Link => |link| {
+                    // TODO move this into a post pass after the frontend?
                     var link_url: []const u8 = undefined;
                     var link_title: ?[]const u8 = undefined;
                     if (link.url) |url| {
@@ -259,20 +260,38 @@ pub const HTMLGenerator = struct {
                     }
                 },
                 .Image => |img| {
+                    var img_url: []const u8 = undefined;
+                    var img_title: ?[]const u8 = undefined;
                     if (img.url) |url| {
-                        // TODO resolve references
-                        try self.html_buf.appendSlice("<img src=\"");
-                        try self.html_buf.appendSlice(url);
-                        try self.html_buf.appendSlice("\" alt=\"");
-                        try self.html_buf.appendSlice(img.alt);
-                        try self.html_buf.appendSlice("\"");
-                        if (img.title) |title| {
-                            try self.html_buf.appendSlice(" title=\"");
-                            try self.html_buf.appendSlice(title);
-                            try self.html_buf.appendSlice("\"");
+                        img_url = url;
+                        img_title = img.title;
+                    } else {
+                        // look up reference by label; must have one if url is null
+                        // returns optional ptr to entry
+                        const maybe_ref = self.label_ref_map.get(img.label.?);
+                        if (maybe_ref) |ref| {
+                            img_url = ref.url.?;
+                            img_title = ref.title;
+                        } else {
+                            HTMLGenerator.report_error(
+                                "No reference definition could be found for label '{s}'!\n",
+                                .{ img.label.? });
+                            return Error.ReferenceLabelNotFound;
                         }
-                        try self.html_buf.appendSlice(" />");
                     }
+
+                    // TODO resolve references
+                    try self.html_buf.appendSlice("<img src=\"");
+                    try self.html_buf.appendSlice(img_url);
+                    try self.html_buf.appendSlice("\" alt=\"");
+                    try self.html_buf.appendSlice(img.alt);
+                    try self.html_buf.appendSlice("\"");
+                    if (img_title) |title| {
+                        try self.html_buf.appendSlice(" title=\"");
+                        try self.html_buf.appendSlice(title);
+                        try self.html_buf.appendSlice("\"");
+                    }
+                    try self.html_buf.appendSlice(" />");
                 },
                 .BuiltinCall => |call| {
                     if (!node_info.is_end)
