@@ -80,13 +80,13 @@ This is a normal paragraph, nothing to see here! %% and this is a comment
    - Unordered sub-list.
 1. Actual numbers don't matter, just that it's a number
    continue
-   %% since SciMarkdown enforces exactly one space after a list item starter
-   %% the line below will only continue if it also is on the same column
-   %% exactly one space after the list item starter!
-   12. But the first number of an ordered list determines the start number!
-       Line continues
-   123. Should be 13.
-        Line continues
+   %% remember that SciMarkdown enforces at least one space after a list item starter
+   %% but beyond that it can be arbitrarily aligned, so the line below will only continue
+   %% if it also is on the same column as the first non-whitespace character
+   12.    But the first number of an ordered list determines the start number!
+          Line continues
+   123.   Should be 13.
+          Line continues
    34659. Should be 14.
 4. And another item.
 
@@ -126,6 +126,8 @@ b. next
 A. Other list
    A. Other sublist
 d) Another
+  - test
+    test
 - other kind
 a. blabla
 

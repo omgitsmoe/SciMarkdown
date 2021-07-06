@@ -244,6 +244,29 @@ pub const Parser = struct {
         log.err(err_msg, args);
     }
 
+    inline fn skip_whitespace(self: *@This(), comptime skip_newline: bool) u32 {
+        var tok = self.peek_token();
+        var skipped: u32 = 0;
+        while (true) : (tok = self.peek_token()) {
+            switch (tok.token_kind) {
+                .Space, .Tab =>{ 
+                    skipped += 1;
+                    self.eat_token();
+                },
+                .Newline => {
+                    if (skip_newline) {
+                        skipped += 1;
+                        self.eat_token();
+                        continue;
+                    }
+                },
+                else => break,
+            }
+        }
+
+        return skipped;
+    }
+
     fn parse_block(self: *Parser, indent_change: i8, prev_line_blank: bool) ParseError!void {
         switch (self.peek_token().token_kind) {
             TokenKind.Comment => {
@@ -413,7 +436,12 @@ pub const Parser = struct {
                     try self.require_token(TokenKind.Space, " after unordered list item starter!");
                     self.eat_token();
 
-                    try self.parse_unordered_list(start_token_kind, start_token.column, prev_line_blank);
+                    const skipped = self.skip_whitespace(false);
+                    // 2 -> 1 for '-' or '+' and 1 for first space
+                    const li_starter_offset = @intCast(u8, 2 + skipped);
+
+                    try self.parse_unordered_list(
+                        start_token_kind, start_token.column, li_starter_offset, prev_line_blank);
                 } else if (start_token_kind == TokenKind.Dash and
                            next_token.token_kind == TokenKind.Dash and
                            self.peek_next_token().token_kind == TokenKind.Dash) {
@@ -489,9 +517,14 @@ pub const Parser = struct {
 
                     try self.require_token(TokenKind.Space, " after ordered list item starter!");
                     self.eat_token();
+
+                    const skipped = self.skip_whitespace(false);
+                    // 2 -> 1 for '.' or ')' and 1 for first ' '
+                    const li_starter_offset = @intCast(u8, start_token.len() + 2 + skipped);
+
                     try self.parse_ordered_list(
                         next_token_kind, start_token.column, prev_line_blank, start_num,
-                        '1', utils.uintDigits(start_num));
+                        '1', li_starter_offset);
                 } else {
                     try self.parse_paragraph(prev_line_blank);
                 }
@@ -730,9 +763,15 @@ pub const Parser = struct {
                             try self.require_token(TokenKind.Space,
                                                    " after ordered (alt) list item starter!");
                             self.eat_token();
+
+
+                            const skipped = self.skip_whitespace(false);
+                            // 3 -> 1 for letter, 1 for '.' or ')' and 1 for first space
+                            const li_starter_offset = @intCast(u8, 3 + skipped);
+
                             try self.parse_ordered_list(
                                 next_token.token_kind, start_token.column,
-                                prev_line_blank, start_num, ol_type, 1);
+                                prev_line_blank, start_num, ol_type, li_starter_offset);
                         } else {
                             try self.parse_paragraph(prev_line_blank);
                         }
@@ -747,7 +786,7 @@ pub const Parser = struct {
     }
 
     /// closes lists that don't match the current token's ident level
-    /// (token.column == list.indent + (2 unordered | li_starter_len + 2 ordered))
+    /// (token.column == list.indent + list.li_starter_offset
     fn close_lists_not_matching_indent(
         self: *Parser,
         initial_last_container: Node.NodeData,
@@ -762,7 +801,7 @@ pub const Parser = struct {
         while (true) {
             switch (last_container) {
                 .UnorderedListItem => |item| {
-                    if (item.indent + 2 != starter_column) {
+                    if (item.indent + item.li_starter_offset != starter_column) {
                         self.close_blocks_until_kind(.UnorderedListItem, false);
                         self.close_list(prev_line_blank);
                         // prev_line_blank gets "used up" by the first list
@@ -772,7 +811,7 @@ pub const Parser = struct {
                     }
                 },
                 .OrderedListItem => |item| {
-                    if (item.indent + item.li_starter_len + 2 != starter_column) {
+                    if (item.indent + item.li_starter_offset != starter_column) {
                         self.close_blocks_until_kind(.OrderedListItem, false);
                         self.close_list(prev_line_blank);
                         // prev_line_blank gets "used up" by the first list
@@ -925,7 +964,7 @@ pub const Parser = struct {
         prev_line_blank: bool,
         start_num: u16,
         ol_type: u8,  // 1, a, A, i or I
-        ol_digits: u8,
+        li_starter_offset: u8,
     ) ParseError!void {
         try self.handle_open_blocks(NodeKind.OrderedListItem, start_column, prev_line_blank);
 
@@ -952,7 +991,7 @@ pub const Parser = struct {
                 .list_item_starter = start_token_kind,
                 .indent = start_column,
                 .ol_type = ol_type,
-                .li_starter_len = ol_digits,
+                .li_starter_offset = li_starter_offset,
             },
         };
         self.open_block(list_item_node);
@@ -962,6 +1001,7 @@ pub const Parser = struct {
         self: *Parser,
         start_token_kind: TokenKind,
         start_column: u16,
+        li_starter_offset: u8,
         prev_line_blank: bool
     ) ParseError!void {
         try self.handle_open_blocks(NodeKind.UnorderedListItem, start_column, prev_line_blank);
@@ -988,6 +1028,7 @@ pub const Parser = struct {
                 .list_item_starter = start_token_kind,
                 .indent = start_column,
                 .ol_type = 0,
+                .li_starter_offset = li_starter_offset,
             },
         };
         self.open_block(list_node_item);

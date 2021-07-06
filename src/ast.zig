@@ -18,6 +18,7 @@ pub const Node = struct {
 
     next: ?*Node,
     first_child: ?*Node,
+    // TODO @Size @Speed remove last_child and replace with method?
     last_child: ?*Node,
 
     // since a tagged union coerces to their tag type we don't need a
@@ -33,13 +34,12 @@ pub const Node = struct {
     ///         1. test
     ///           - sublist
     ///           ^ this is the indent of the sublist
-    // we also need to store the list item starter length (due to ordered list item
-    // starters being variable)
+    // we also need to store the list item starter offset (due to ordered list item
+    // starters being variable) and so users can align the text abritrarily
     pub const ListItemData = struct { list_item_starter: TokenKind, indent: u16,
-                                      //           nr of digits for ol li, otherwise 1
-                                      //           (only the immediate token length,
-                                      //            not including '.' or ')')
-                                      ol_type: u8, li_starter_len: u8 = 1 };
+                                      //           offset in bytes from immediate list item starter
+                                      //           to first non-whitespace byte
+                                      ol_type: u8, li_starter_offset: u8 };
     pub const CitationData = struct { id: []const u8 };
 
     // tagged union
