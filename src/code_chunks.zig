@@ -96,37 +96,19 @@ pub const CodeRunner = struct {
                     if (data.language == lang and data.run) {
                         try self.code_datas.append(data);
 
+                        try self.merged_code.appendSlice(data.code);
                         switch (self.lang) {
                             .Python => {
-                                // pre-alloc at least as much as the code buf acutally uses
-                                // (could also count the \n to allocate exactly as much
-                                //  as we need and then use appendAssumeCapacity, but
-                                //  prob not worth)
-                                try self.merged_code.ensureUnusedCapacity(data.code.len);
-                                var tok_iter = std.mem.tokenize(data.code, "\n");
-                                while (tok_iter.next()) |line| {
-                                    try self.merged_code.appendSlice("  ");
-                                    try self.merged_code.appendSlice(line);
-                                    try self.merged_code.append('\n');
-                                }
-                                // need to wrap the user code in try/except blocks
-                                // so we can catch the exception and print the msg
-                                // using our system
-                                // TODO change this to use sys.excepthook
+                                // runtime exceptions are written to stderr using our system
+                                // by register our own sys.excepthook
                                 try self.merged_code.appendSlice(
-                                    \\except Exception as err:
-                                    \\  traceback.print_exc(file=sys.stderr)
-                                    \\  sys.stderr.real_flush()
-                                    \\  sys.exit(1)
+                                    \\
                                     \\sys.stdout.real_flush()
                                     \\sys.stderr.real_flush()
-                                    \\
-                                    \\try:
                                     \\
                                 );
                             },
                             .R => {
-                                try self.merged_code.appendSlice(data.code);
                                 // using sink(connection) to divert stdout or stderr output
                                 // to the passed connection
                                 //
@@ -167,9 +149,7 @@ pub const CodeRunner = struct {
 
         switch(self.lang) {
             .Python => try self.merged_code.appendSlice(
-                \\  pass
-                \\except:
-                \\  pass
+                \\
                 \\sys.exit(0)
             ),
             .R => {
@@ -244,6 +224,7 @@ pub const CodeRunner = struct {
                 },
             }
         } else {
+            std.debug.print("ERR: {s}\n", .{ stderr });
             // execution failed, output the process' stderr
             var err_chunk: []const u8 = "No error message captured!";
             switch (self.lang) {
@@ -256,7 +237,6 @@ pub const CodeRunner = struct {
             }
             log.err("Code execution failed for language {s}:\n{s}",
                     .{ @tagName(self.lang), err_chunk });
-            std.debug.print("ERR: {s}\n", .{ stderr });
         }
     }
 
