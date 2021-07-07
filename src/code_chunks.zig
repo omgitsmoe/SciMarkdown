@@ -96,11 +96,37 @@ pub const CodeRunner = struct {
                     if (data.language == lang and data.run) {
                         try self.code_datas.append(data);
 
-                        try self.merged_code.appendSlice(data.code);
                         switch (self.lang) {
-                            .Python => try self.merged_code.appendSlice(
-                                "\n\nsys.stdout.real_flush()\nsys.stderr.real_flush()\n\n"),
+                            .Python => {
+                                // pre-alloc at least as much as the code buf acutally uses
+                                // (could also count the \n to allocate exactly as much
+                                //  as we need and then use appendAssumeCapacity, but
+                                //  prob not worth)
+                                try self.merged_code.ensureUnusedCapacity(data.code.len);
+                                var tok_iter = std.mem.tokenize(data.code, "\n");
+                                while (tok_iter.next()) |line| {
+                                    try self.merged_code.appendSlice("  ");
+                                    try self.merged_code.appendSlice(line);
+                                    try self.merged_code.append('\n');
+                                }
+                                // need to wrap the user code in try/except blocks
+                                // so we can catch the exception and print the msg
+                                // using our system
+                                // TODO change this to use sys.excepthook
+                                try self.merged_code.appendSlice(
+                                    \\except Exception as err:
+                                    \\  traceback.print_exc(file=sys.stderr)
+                                    \\  sys.stderr.real_flush()
+                                    \\  sys.exit(1)
+                                    \\sys.stdout.real_flush()
+                                    \\sys.stderr.real_flush()
+                                    \\
+                                    \\try:
+                                    \\
+                                );
+                            },
                             .R => {
+                                try self.merged_code.appendSlice(data.code);
                                 // using sink(connection) to divert stdout or stderr output
                                 // to the passed connection
                                 //
@@ -140,7 +166,12 @@ pub const CodeRunner = struct {
         }
 
         switch(self.lang) {
-            .Python => try self.merged_code.appendSlice("sys.exit(0)"),
+            .Python => try self.merged_code.appendSlice(
+                \\  pass
+                \\except:
+                \\  pass
+                \\sys.exit(0)
+            ),
             .R => {
                 // close textconnections
                 try self.merged_code.appendSlice(
@@ -192,26 +223,126 @@ pub const CodeRunner = struct {
         errdefer allocator.free(stderr);
         log.debug("Done reading from stderr!\n", .{});
 
-        _ = try self.runner.wait();
-        log.debug("Done waiting on code execution child: {s}!\n", .{ @tagName(self.lang) });
+        const term = try self.runner.wait();
+        log.debug("Done waiting on code execution child: {s} result {any}!\n",
+                  .{ @tagName(self.lang), term });
 
-        switch (self.lang) {
-            .R => {
-                self.assign_output_to_nodes_text(stdout, false);
-                self.assign_output_to_nodes_text(stderr, true);
-            },
-            else => {
-                self.assign_output_to_nodes_bin(stdout, false);
-                self.assign_output_to_nodes_bin(stderr, true);
-            },
+        const success = switch (term) {
+            .Exited => |code| if (code == 0) true else false,
+            .Stopped, .Signal, .Unknown => false,
+        };
+
+        if (success) {
+            switch (self.lang) {
+                .R, .Python => {
+                    self.assign_output_to_nodes_text(stdout, false);
+                    self.assign_output_to_nodes_text(stderr, true);
+                },
+                else => {
+                    self.assign_output_to_nodes_bin(stdout, false);
+                    self.assign_output_to_nodes_bin(stderr, true);
+                },
+            }
+        } else {
+            // execution failed, output the process' stderr
+            var err_chunk: []const u8 = "No error message captured!";
+            switch (self.lang) {
+                .R, .Python => {
+                    var iter = ChunkTextIterator.init(stderr, 0);
+                    // assume error msg is contained in last chunk of stderr
+                    while (iter.next()) |chunk| { err_chunk = chunk; }
+                },
+                else => {},
+            }
+            log.err("Code execution failed for language {s}:\n{s}",
+                    .{ @tagName(self.lang), err_chunk });
+            std.debug.print("ERR: {s}\n", .{ stderr });
         }
     }
 
-
     fn assign_output_to_nodes_bin(self: *CodeRunner, bytes: []const u8, comptime is_err: bool) void {
-        var i: u32 = 0;
+        var iter = ChunkBinIterator.init(bytes, 0);
         var code_chunk: u16 = 0;
-        while (i < bytes.len) {
+        while (iter.next()) |chunk| {
+            log.debug("\nCHUNK OUT:\n'''{s}'''\n----------\n", .{ chunk });
+            if (!is_err) {
+                if (chunk.len > 0)
+                    self.code_datas.items[code_chunk].stdout = chunk;
+            } else {
+                if (chunk.len > 0)
+                    self.code_datas.items[code_chunk].stderr = chunk;
+            }
+            code_chunk += 1;
+        }
+    }
+
+    fn assign_output_to_nodes_text(self: *CodeRunner, bytes: []const u8, comptime is_err: bool) void {
+        var iter = ChunkTextIterator.init(bytes, 0);
+        var code_chunk: u16 = 0;
+        while (iter.next()) |chunk| {
+            log.debug("\nCHUNK OUT:\n'''{s}'''\n----------\n", .{ chunk });
+
+            if (!is_err) {
+                if (chunk.len > 0)
+                    self.code_datas.items[code_chunk].stdout = chunk;
+            } else {
+                if (chunk.len > 0)
+                    self.code_datas.items[code_chunk].stderr = chunk;
+            }
+            code_chunk += 1;
+        }
+    }
+
+    pub const ChunkTextIterator = struct {
+        bytes: []const u8,
+        offset: u32,
+
+        pub fn init(bytes: []const u8, offset: u32) @This() {
+            return .{
+                .bytes = bytes,
+                .offset = offset,
+            };
+        }
+
+        // @Compiler
+        // return [] for chunk len 0 and null on iteration end
+        // or null for len 0 and return error for iteration end?
+        // returning error is extremely weird to use since
+        // you can't just use the |payload| capture syntax
+        pub fn next(self: *@This()) ?[]const u8 {
+            var i: u32 = self.offset;
+            if (i >= self.bytes.len) return null;
+
+            // chunk out length as text followed by ';'
+            const text_len_start = i;
+            while (self.bytes[i] != ';') : ( i += 1 ) {}
+            const text_len_end = i;
+            i += 1;  // skip ;
+            const chunk_out_len = std.fmt.parseUnsigned(
+                u32, self.bytes[text_len_start..text_len_end], 10) catch unreachable;
+
+            const chunk_out = self.bytes[i..i + chunk_out_len];
+            i += chunk_out_len;
+            self.offset = i;
+
+            return chunk_out;
+        }
+    };
+
+    pub const ChunkBinIterator = struct {
+        bytes: []const u8,
+        offset: u32,
+
+        pub fn init(bytes: []const u8, offset: u32) @This() {
+            return .{
+                .bytes = bytes,
+                .offset = offset,
+            };
+        }
+
+        pub fn next(self: *@This()) ?[]const u8 {
+            var i: u32 = self.offset;
+            if (i >= self.bytes.len) return null;
             // first 4 bytes that contain chunk out length
             // const chunk_out_len = std.mem.readIntNative(u32, @ptrCast(*const [4]u8, &stdout[i]));
             // const chunk_out_len = std.mem.bytesToValue(u32, @ptrCast(*const [4]u8, &stdout[i]));
@@ -222,49 +353,12 @@ pub const CodeRunner = struct {
             // and u32 is 4-aligned
             // const chunk_out_len = @ptrCast(*const u32, @alignCast(@alignOf(u32), &stdout[i])).*;
             // just specify that the *u32 is 1-aligned
-            const chunk_out_len = @ptrCast(*align(1)const u32, &bytes[i]).*;
-            var chunk_out: ?[]const u8 = null;
-            if (chunk_out_len > 0) {
-                chunk_out = bytes[i+4..i+4+chunk_out_len];
-                log.debug("\nCHUNK OUT:\n'''{s}'''\n----------\n", .{ chunk_out });
-            }
+            const chunk_out_len = @ptrCast(*align(1)const u32, &self.bytes[i]).*;
+            const chunk_out = self.bytes[i+4..i+4+chunk_out_len];
             i += 4 + chunk_out_len;
+            self.offset = i;
 
-            if (!is_err) {
-                self.code_datas.items[code_chunk].stdout = chunk_out;
-            } else {
-                self.code_datas.items[code_chunk].stderr = chunk_out;
-            }
-            code_chunk += 1;
+            return chunk_out;
         }
-    }
-
-    fn assign_output_to_nodes_text(self: *CodeRunner, bytes: []const u8, comptime is_err: bool) void {
-        var i: u32 = 0;
-        var code_chunk: u16 = 0;
-        while (i < bytes.len) {
-            // chunk out length as text followed by ';'
-            var text_len_start = i;
-            while (bytes[i] != ';') : ( i += 1 ) {}
-            var text_len_end = i;
-            i += 1;  // skip ;
-            const chunk_out_len = std.fmt.parseUnsigned(
-                u32, bytes[text_len_start..text_len_end], 10) catch unreachable;
-
-            var chunk_out: ?[]const u8 = null;
-            if (chunk_out_len > 0) {
-                chunk_out = bytes[i..i + chunk_out_len];
-                log.debug("\nCHUNK OUT:\n'''{s}'''\n----------\n", .{ chunk_out });
-            }
-            i += chunk_out_len;
-
-            if (!is_err) {
-                self.code_datas.items[code_chunk].stdout = chunk_out;
-            } else {
-                self.code_datas.items[code_chunk].stderr = chunk_out;
-            }
-            code_chunk += 1;
-
-        }
-    }
+    };
 };

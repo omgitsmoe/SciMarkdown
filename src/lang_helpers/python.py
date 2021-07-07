@@ -1,22 +1,18 @@
 import sys
 import os
-import struct
+import traceback
 
 
 class BufferedIOHelper:
     def __init__(self, text_io):
         self.text_io = text_io
+        # set newline mode on text_io so that newlines don't get translated
+        text_io.reconfigure(newline='')
         self.buffer = []
 
     def write(self, s):
-        # since we use stdout in binary mode anyway encode the string
-        # (need to anyway to get the length in bytes)
-        if type(s) is bytes:
-            b = s
-        else:
-            b = s.encode('utf-8')
-        self.buffer.append(b)
-        # don't know if this must return length in chars?
+        self.buffer.append(s)
+        # don't know if this must return length in runes or bytes?
         return len(s)
 
     def flush(self):
@@ -24,17 +20,15 @@ class BufferedIOHelper:
         return
 
     def real_flush(self):
-        # length followed by chunk's output of this stream
-        # need to open TextIOWrapper underlying file descriptor in binary mode
-        # so we can write the length as unsigned long
-        # closefd=False so file descr doesn't get close by ctx manager
-        with os.fdopen(self.text_io.fileno(), "wb", closefd=False) as stdio:
-            stdio.write(struct.pack('L', sum(len(s) for s in self.buffer)))
-            stdio.flush()
+        text_io = self.text_io
+        # length + ';' followed by chunk's output of this stream
+        write_len = sum(len(s.encode('utf-8')) for s in self.buffer)
+        text_io.write(f"{write_len};")
+        text_io.flush()
 
-            for binary_data in self.buffer:
-                stdio.write(binary_data)
-            stdio.flush()
+        for data in self.buffer:
+            text_io.write(data)
+        text_io.flush()
 
         self.buffer.clear()
 
@@ -43,4 +37,6 @@ class BufferedIOHelper:
 # after a chunk and writes the length of the following content out first
 sys.stdout = BufferedIOHelper(sys.stdout)
 sys.stderr = BufferedIOHelper(sys.stderr)
+
+try:
 
