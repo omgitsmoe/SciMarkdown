@@ -119,7 +119,7 @@ pub const CodeRunner = struct {
                                 // can't reset the stdout_buf vector (functional language YAY)
                                 // and re-assigning errors since there's a binding to out_tcon
                                 // -> close and then re-open connection
-                                // the connection needs to be close before sending the buf contents
+                                // the connection needs to be closed before sending the buf contents
                                 // to stdout otherwise some content might not be written to the
                                 // buf yet, since it only flushes once a \n is reached
                                 try self.merged_code.appendSlice(
@@ -225,6 +225,7 @@ pub const CodeRunner = struct {
             }
         } else {
             std.debug.print("ERR: {s}\n", .{ stderr });
+            // TODO should other stdout/err chunks also be printed for printf debugging?
             // execution failed, output the process' stderr
             var err_chunk: []const u8 = "No error message captured!";
             switch (self.lang) {

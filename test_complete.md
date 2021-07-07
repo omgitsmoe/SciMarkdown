@@ -240,9 +240,14 @@ plt.ylabel('some numbers')
 print("second print")
 ```
 
-%% TODO output error
 ```python
 a = 5 + 'a'
+```
+
+```r
+d <- function(x) { x + 'a' }
+f <- function(x) { d(x) }
+a = f(5)
 ```
 
 Python inline: >`py print("printed from within python")`
