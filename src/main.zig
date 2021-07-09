@@ -156,7 +156,6 @@ pub fn main() !void {
     }
 
     var html_gen = HTMLGenerator.init(allocator, parser.current_document, parser.label_ref_map);
-    const html_out = try html_gen.generate();
 
     var file: std.fs.File = undefined;
     if (std.fs.path.isAbsolute(out_filename)) {
@@ -173,5 +172,7 @@ pub fn main() !void {
     }
     defer file.close();
 
-    try file.writeAll(html_out);
+    var out = std.io.bufferedWriter(file.writer());
+    try html_gen.write(@TypeOf(out), out.writer());
+    try out.flush();
 }

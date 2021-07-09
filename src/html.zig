@@ -9,12 +9,10 @@ const NodeKind = ast.NodeKind;
 
 pub const HTMLGenerator = struct {
     allocator: *std.mem.Allocator,
-    html_buf: std.ArrayList(u8),
     start_node: *Node,
     label_ref_map: std.StringHashMap(*Node.LinkData),
 
     pub const Error = error {
-        OutOfMemory,
         ReferenceLabelNotFound,
         FormatBufferTooSmall,
     };
@@ -27,7 +25,6 @@ pub const HTMLGenerator = struct {
     ) HTMLGenerator {
         return HTMLGenerator{
             .allocator = allocator,
-            .html_buf = std.ArrayList(u8).init(allocator),
             .start_node = start_node,
             .label_ref_map = label_ref_map,
         };
@@ -37,10 +34,17 @@ pub const HTMLGenerator = struct {
         log.err(err_msg, args);
     }
 
-    pub fn generate(self: *HTMLGenerator) Error![]const u8 {
+    /// If out_stream is a bufferedWriter the caller is expected to call .flush()
+    /// since the other out_streams don't have that method.
+    // need to pass the writertype if we want an explicit error set by merging them
+    pub fn write(
+        self: *HTMLGenerator,
+        comptime WriterType: type,
+        out_stream: anytype
+    ) (Error || WriterType.Error)!void {
         var dfs = DFS(Node, true).init(self.start_node);
 
-        try self.html_buf.appendSlice(
+        try out_stream.writeAll(
             \\<html>
             \\<head>
             \\<meta charset="utf-8">
@@ -62,24 +66,24 @@ pub const HTMLGenerator = struct {
                 .Undefined, .Import => unreachable,
                 // blocks like thematic break should never get both a start and end NodeInfo
                 // since they can't contain other blocks
-                .ThematicBreak => try self.html_buf.appendSlice("<hr/>\n"),
+                .ThematicBreak => try out_stream.writeAll("<hr/>\n"),
                 .Heading => |heading| {
                     var hbuf: [4]u8 = undefined;
                     _ = std.fmt.bufPrint(&hbuf, "h{}>\n", .{ heading.level })
                         catch return Error.FormatBufferTooSmall;
                     if (node_info.is_end) {
-                        try self.html_buf.appendSlice("</");
+                        try out_stream.writeAll("</");
                     } else {
-                        try self.html_buf.append('<');
+                        try out_stream.writeByte('<');
                     }
-                    try self.html_buf.appendSlice(&hbuf);
+                    try out_stream.writeAll(&hbuf);
                 },
                 .UnorderedList => |list| {
                     if (!node_info.is_end) {
                         in_compact_list = if (list.blank_lines > 0) false else true;
-                        try self.html_buf.appendSlice("<ul>\n");
+                        try out_stream.writeAll("<ul>\n");
                     } else {
-                        try self.html_buf.appendSlice("</ul>\n");
+                        try out_stream.writeAll("</ul>\n");
                         in_compact_list = HTMLGenerator.get_parents_list_compact_status(node_info.data);
                     }
                 },
@@ -87,140 +91,140 @@ pub const HTMLGenerator = struct {
                     if (!node_info.is_end) {
                         in_compact_list = if (list.blank_lines > 0) false else true;
                         if (list.start_num == 1 and list.ol_type == '1') {
-                            try self.html_buf.appendSlice("<ol>\n");
+                            try out_stream.writeAll("<ol>\n");
                         } else {
                             var numbuf: [4]u8 = undefined;
                             var numslice = std.fmt.bufPrint(&numbuf, "{}", .{ list.start_num })
                                 catch return Error.FormatBufferTooSmall;
-                            try self.html_buf.appendSlice("<ol start=\"");
-                            try self.html_buf.appendSlice(numslice);
-                            try self.html_buf.appendSlice("\" type=\"");
-                            try self.html_buf.append(list.ol_type);
-                            try self.html_buf.appendSlice("\">\n");
+                            try out_stream.writeAll("<ol start=\"");
+                            try out_stream.writeAll(numslice);
+                            try out_stream.writeAll("\" type=\"");
+                            try out_stream.writeByte(list.ol_type);
+                            try out_stream.writeAll("\">\n");
                         }
                     } else {
-                        try self.html_buf.appendSlice("</ol>\n");
+                        try out_stream.writeAll("</ol>\n");
                         in_compact_list = HTMLGenerator.get_parents_list_compact_status(node_info.data);
                     }
                 },
                 .UnorderedListItem, .OrderedListItem => {
                     if (!node_info.is_end) {
-                        try self.html_buf.appendSlice("<li>\n");
+                        try out_stream.writeAll("<li>\n");
                     } else {
-                        try self.html_buf.appendSlice("</li>\n");
+                        try out_stream.writeAll("</li>\n");
                     }
                 },
                 .FencedCode => |code| {
                     if (!node_info.is_end) continue;
 
                     // no \n since the whitespace is printed verbatim in a <pre> env
-                    try self.html_buf.appendSlice("<pre><code>");
-                    try self.html_buf.appendSlice(code.code);
-                    try self.html_buf.appendSlice("</code></pre>\n");
+                    try out_stream.writeAll("<pre><code>");
+                    try out_stream.writeAll(code.code);
+                    try out_stream.writeAll("</code></pre>\n");
 
                     if (code.stdout) |out| {
-                        try self.html_buf.appendSlice("Output:");
-                        try self.html_buf.appendSlice("<pre>\n");
-                        try self.html_buf.appendSlice(out);
-                        try self.html_buf.appendSlice("</pre>\n");
+                        try out_stream.writeAll("Output:");
+                        try out_stream.writeAll("<pre>\n");
+                        try out_stream.writeAll(out);
+                        try out_stream.writeAll("</pre>\n");
                     }
                     if (code.stderr) |err| {
-                        try self.html_buf.appendSlice("Warnings:");
-                        try self.html_buf.appendSlice("<pre>\n");
-                        try self.html_buf.appendSlice(err);
-                        try self.html_buf.appendSlice("</pre>\n");
+                        try out_stream.writeAll("Warnings:");
+                        try out_stream.writeAll("<pre>\n");
+                        try out_stream.writeAll(err);
+                        try out_stream.writeAll("</pre>\n");
                     }
                 },
                 .MathInline => |math| {
                     // \(...\) are the default MathJax inline delimiters instead of $...$
-                    try self.html_buf.appendSlice("\\(");
-                    try self.html_buf.appendSlice(math.text);
-                    try self.html_buf.appendSlice("\\)");
+                    try out_stream.writeAll("\\(");
+                    try out_stream.writeAll(math.text);
+                    try out_stream.writeAll("\\)");
                 },
                 .MathMultiline => |math| {
-                    try self.html_buf.appendSlice("$$");
-                    try self.html_buf.appendSlice(math.text);
-                    try self.html_buf.appendSlice("$$\n");
+                    try out_stream.writeAll("$$");
+                    try out_stream.writeAll(math.text);
+                    try out_stream.writeAll("$$\n");
                 },
                 .BlockQuote => {
                     if (!node_info.is_end) {
-                        try self.html_buf.appendSlice("<blockquote>\n");
+                        try out_stream.writeAll("<blockquote>\n");
                     } else {
-                        try self.html_buf.appendSlice("</blockquote>\n");
+                        try out_stream.writeAll("</blockquote>\n");
                     }
                 },
                 .Paragraph => {
                     if (!in_compact_list) {
                         if (!node_info.is_end) {
-                            try self.html_buf.appendSlice("<p>\n");
+                            try out_stream.writeAll("<p>\n");
                         } else {
-                            try self.html_buf.appendSlice("</p>\n");
+                            try out_stream.writeAll("</p>\n");
                         }
                     }
                 },
                 .BibEntry => {
                     if (!node_info.is_end) {
-                        try self.html_buf.appendSlice("<p>\n");
+                        try out_stream.writeAll("<p>\n");
                     } else {
-                        try self.html_buf.appendSlice("</p>\n");
+                        try out_stream.writeAll("</p>\n");
                     }
                 },
                 .Emphasis => {
                     if (!node_info.is_end) {
-                        try self.html_buf.appendSlice("<em>");
+                        try out_stream.writeAll("<em>");
                     } else {
-                        try self.html_buf.appendSlice("</em>");
+                        try out_stream.writeAll("</em>");
                     }
                 },
                 .StrongEmphasis => {
                     if (!node_info.is_end) {
-                        try self.html_buf.appendSlice("<strong>");
+                        try out_stream.writeAll("<strong>");
                     } else {
-                        try self.html_buf.appendSlice("</strong>");
+                        try out_stream.writeAll("</strong>");
                     }
                 },
                 .Strikethrough => {
                     if (!node_info.is_end) {
-                        try self.html_buf.appendSlice("<strike>");
+                        try out_stream.writeAll("<strike>");
                     } else {
-                        try self.html_buf.appendSlice("</strike>");
+                        try out_stream.writeAll("</strike>");
                     }
                 },
                 .Superscript => {
                     if (!node_info.is_end) {
-                        try self.html_buf.appendSlice("<sup>");
+                        try out_stream.writeAll("<sup>");
                     } else {
-                        try self.html_buf.appendSlice("</sup>");
+                        try out_stream.writeAll("</sup>");
                     }
                 },
                 .Subscript => {
                     if (!node_info.is_end) {
-                        try self.html_buf.appendSlice("<sub>");
+                        try out_stream.writeAll("<sub>");
                     } else {
-                        try self.html_buf.appendSlice("</sub>");
+                        try out_stream.writeAll("</sub>");
                     }
                 },
                 .SmallCaps => {
                     if (!node_info.is_end) {
-                        try self.html_buf.appendSlice("<span style=\"font-variant: small-caps;\">");
+                        try out_stream.writeAll("<span style=\"font-variant: small-caps;\">");
                     } else {
-                        try self.html_buf.appendSlice("</span>");
+                        try out_stream.writeAll("</span>");
                     }
                 },
                 .Underline => {
                     if (!node_info.is_end) {
-                        try self.html_buf.appendSlice("<u>");
+                        try out_stream.writeAll("<u>");
                     } else {
-                        try self.html_buf.appendSlice("</u>");
+                        try out_stream.writeAll("</u>");
                     }
                 },
                 .CodeSpan => |code| {
                     if (code.stdout) |out| {
-                        try self.html_buf.appendSlice(out);
+                        try out_stream.writeAll(out);
                     } else {
-                        try self.html_buf.appendSlice("<code>");
-                        try self.html_buf.appendSlice(code.code);
-                        try self.html_buf.appendSlice("</code>");
+                        try out_stream.writeAll("<code>");
+                        try out_stream.writeAll(code.code);
+                        try out_stream.writeAll("</code>");
                     }
                 },
                 .Link => |link| {
@@ -246,17 +250,17 @@ pub const HTMLGenerator = struct {
                     }
 
                     if (!node_info.is_end) {
-                        try self.html_buf.appendSlice("<a href=\"");
-                        try self.html_buf.appendSlice(link_url);
-                        try self.html_buf.append('"');
+                        try out_stream.writeAll("<a href=\"");
+                        try out_stream.writeAll(link_url);
+                        try out_stream.writeByte('"');
                         if (link_title) |title| {
-                            try self.html_buf.appendSlice("title=\"");
-                            try self.html_buf.appendSlice(title);
-                            try self.html_buf.append('"');
+                            try out_stream.writeAll("title=\"");
+                            try out_stream.writeAll(title);
+                            try out_stream.writeByte('"');
                         }
-                        try self.html_buf.append('>');
+                        try out_stream.writeByte('>');
                     } else {
-                        try self.html_buf.appendSlice("</a>");
+                        try out_stream.writeAll("</a>");
                     }
                 },
                 .Image => |img| {
@@ -280,18 +284,17 @@ pub const HTMLGenerator = struct {
                         }
                     }
 
-                    // TODO resolve references
-                    try self.html_buf.appendSlice("<img src=\"");
-                    try self.html_buf.appendSlice(img_url);
-                    try self.html_buf.appendSlice("\" alt=\"");
-                    try self.html_buf.appendSlice(img.alt);
-                    try self.html_buf.appendSlice("\"");
+                    try out_stream.writeAll("<img src=\"");
+                    try out_stream.writeAll(img_url);
+                    try out_stream.writeAll("\" alt=\"");
+                    try out_stream.writeAll(img.alt);
+                    try out_stream.writeAll("\"");
                     if (img_title) |title| {
-                        try self.html_buf.appendSlice(" title=\"");
-                        try self.html_buf.appendSlice(title);
-                        try self.html_buf.appendSlice("\"");
+                        try out_stream.writeAll(" title=\"");
+                        try out_stream.writeAll(title);
+                        try out_stream.writeAll("\"");
                     }
-                    try self.html_buf.appendSlice(" />");
+                    try out_stream.writeAll(" />");
                 },
                 .BuiltinCall => |call| {
                     if (!node_info.is_end)
@@ -300,27 +303,26 @@ pub const HTMLGenerator = struct {
                     switch (call.builtin_type) {
                         // TODO fix for nodes like e.g. FencedCode, Heading
                         .label => {
-                            try self.html_buf.appendSlice("<span id=\"");
-                            try self.html_buf.appendSlice(call.result.?.label);
-                            try self.html_buf.appendSlice("\"></span>");
+                            try out_stream.writeAll("<span id=\"");
+                            try out_stream.writeAll(call.result.?.label);
+                            try out_stream.writeAll("\"></span>");
                         },
                         else => {},
                     }
                 },
-                .HardLineBreak => try self.html_buf.appendSlice("<br/>\n"),
-                .SoftLineBreak => try self.html_buf.append('\n'),
+                .HardLineBreak => try out_stream.writeAll("<br/>\n"),
+                .SoftLineBreak => try out_stream.writeByte('\n'),
                 .Text => |text| {
                     if (node_info.data.first_child) |fc| {
                         log.debug("Text node has child: {}\n", .{ fc.data });
                     }
-                    try self.html_buf.appendSlice(text.text);
+                    try out_stream.writeAll(text.text);
                 },
                 else => continue,
             }
         }
 
-        try self.html_buf.appendSlice("</div></body>\n</html>");
-        return self.html_buf.toOwnedSlice();
+        try out_stream.writeAll("</div></body>\n</html>");
     }
 
     /// assumes current_list.parent is not null
