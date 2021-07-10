@@ -1880,7 +1880,7 @@ pub const Parser = struct {
         switch (result) {
             .cite, .textcite, .cites => {
                 // save the result in the node if we're the top level call
-                const persistent = try self.allocator.create(bic.BuiltinResult);
+                const persistent = try self.node_arena.allocator.create(bic.BuiltinResult);
                 persistent.* = result;
                 builtin.data.BuiltinCall.result = persistent;
 
@@ -1897,7 +1897,7 @@ pub const Parser = struct {
                 self.bibliography = result.bibliography;
             },
             .label => {
-                const persistent = try self.allocator.create(bic.BuiltinResult);
+                const persistent = try self.node_arena.allocator.create(bic.BuiltinResult);
                 persistent.* = result;
                 builtin.data.BuiltinCall.result = persistent;
             },
