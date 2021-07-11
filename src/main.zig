@@ -8,20 +8,21 @@ const CodeRunner = @import("code_chunks.zig").CodeRunner;
 const cite = @import("cite.zig");
 const run_citeproc = cite.run_citeproc;
 const csl = @import("csl_json.zig");
+const ast = @import("ast.zig");
 
 const clap = @import("zig-clap");
 
 pub fn main() !void {
     // gpa optimized for safety over performance; can detect leaks, double-free and use-after-free
     // takes a config struct (empty here .{})
-    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    // defer {
-    //     const leaked = gpa.deinit();
-    //     // print takes a format string and a struct
-    //     // prints automatically std.debug.print("Leak detected: {}\n", .{leaked});
-    // }
-    // const allocator = &gpa.allocator;
-    const allocator = std.heap.page_allocator;
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer {
+        const leaked = gpa.deinit();
+        // print takes a format string and a struct
+        // prints automatically std.debug.print("Leak detected: {}\n", .{leaked});
+    }
+    const allocator = &gpa.allocator;
+    // const allocator = std.heap.page_allocator;
 
     // We can use `parseParam` to parse a string to a `Param(Help)`
     @setEvalBranchQuota(2000);
@@ -124,10 +125,17 @@ pub fn main() !void {
     // execute code for found languages
     var run_lang_iter = parser.run_languages.iterator();
     var runners = std.ArrayList(CodeRunner).init(allocator);
+    defer runners.deinit();
     while (run_lang_iter.next()) |lang| {
         var code_runner = try runners.addOne();
         code_runner.* = try CodeRunner.init(allocator, lang, parser.current_document);
-        try code_runner.run();
+        // TODO still go for checking if the exe is available manually?
+        // unfortunately not possible to switch on error sets yet:
+        // https://github.com/ziglang/zig/issues/2473
+        code_runner.run() catch |err| {
+            log.err("Running {s} code chunks with executable '{s}' failed with error: {s}\n",
+                    .{ @tagName(lang), "TODO", @errorName(err) });
+        };
     }
     defer {
         for (runners.items) |*runner| {
@@ -140,9 +148,15 @@ pub fn main() !void {
             const write_conversion = args.flag("--write-bib-conversion");
             const csl_json_result = try cite.csl_items_from_file(allocator, ref_file.?, write_conversion);
             defer csl_json_result.arena.deinit();
-            const bib_entries = try run_citeproc(
+
+            const bib_entries = run_citeproc(
                 &parser.node_arena.allocator, parser.citations.items, csl_json_result.items,
-                csl_file.?, csl_locale.?);
+                csl_file.?, csl_locale.?) catch |err| blk: {
+                    log.err("Running citeproc failed with error: {s}\n", .{ @errorName(err) });
+                    log.err("Citation processing was aborted!", .{});
+
+                    break :blk &[_]*ast.Node{};
+            };
             if (parser.bibliography) |bib| {
                 for (bib_entries) |entry| {
                     bib.append_child(entry);

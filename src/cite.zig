@@ -186,6 +186,32 @@ pub fn run_citeproc(
     csl_file: []const u8,
     locale: []const u8,
 ) ![]*Node {
+    // NOTE: Try spawning the process before doing most of the work, so we can at
+    // least abort on Windows, should the executable not be available
+    // (on POSIX that info is delayed till we .wait() on the process, at least
+    //  in zig's implementation)
+    // NOTE: excecutable has to be specified without extension otherwise it tries to
+    // find it as executable.exe.exe *.exe.bat etc.
+    // see: https://github.com/ziglang/zig/pull/2705 and https://github.com/ziglang/zig/pull/2770
+    const cmd = &[_][]const u8{
+        "citeproc", "--format=json",
+        "--style", csl_file,
+    };
+
+    log.debug("Cite commands:", .{});
+    for (cmd) |c| {
+        log.debug("{s} ", .{ c });
+    }
+
+    var runner = try std.ChildProcess.init(cmd, allocator);
+    defer runner.deinit();
+    runner.stdin_behavior = .Pipe;
+    runner.stdout_behavior = .Pipe;
+    runner.stderr_behavior = .Pipe;
+
+    // order important otherwise stdin etc. not initialized
+    try runner.spawn();
+
     // jgm/citeproc states that it takes either an array of Citation{} objects (json)
     // or an array of CitationItem arrays
     // but if the first option is passed it errors:
@@ -264,28 +290,6 @@ pub fn run_citeproc(
         .references = used_refs.items,
         .lang = locale,
     };
-
-    // NOTE: excecutable has to be specified without extension otherwise it tries to
-    // find it as executable.exe.exe *.exe.bat etc.
-    // see: https://github.com/ziglang/zig/pull/2705 and https://github.com/ziglang/zig/pull/2770
-    const cmd = &[_][]const u8{
-        "citeproc", "--format=json",
-        "--style", csl_file,
-    };
-
-    log.debug("Cite commands:", .{});
-    for (cmd) |c| {
-        log.debug("{s} ", .{ c });
-    }
-
-    var runner = try std.ChildProcess.init(cmd, allocator);
-    defer runner.deinit();
-    runner.stdin_behavior = .Pipe;
-    runner.stdout_behavior = .Pipe;
-    runner.stderr_behavior = .Pipe;
-
-    // order important otherwise stdin etc. not initialized
-    try runner.spawn();
 
     // write program code to stdin
     // debug try std.json.stringify(to_citeproc, .{}, std.io.getStdOut().writer());

@@ -50,14 +50,18 @@ const python_helper = @embedFile("./lang_helpers/python.py");
 const r_helper = @embedFile("./lang_helpers/R.r");
 
 pub const CodeRunner = struct {
+    root_node: *ast.Node,
     code_datas: std.ArrayList(*ast.Node.CodeData),
     lang: Language,
     merged_code: std.ArrayList(u8),
     runner: *std.ChildProcess,
     out_buf: std.heap.ArenaAllocator,
 
+    // TODO @CleanUp is a type even needed for this? we could just use a function that returns
+    // a struct with a deinit method?
     pub fn init(allocator: *std.mem.Allocator, language: Language, root_node: *ast.Node) !CodeRunner {
         var code_runner = CodeRunner{
+            .root_node = root_node,
             .code_datas = std.ArrayList(*ast.Node.CodeData).init(allocator),
             .lang = language,
             .merged_code = std.ArrayList(u8).init(allocator),
@@ -65,7 +69,6 @@ pub const CodeRunner = struct {
             .out_buf = std.heap.ArenaAllocator.init(allocator),
         };
 
-        try code_runner.gather_code_blocks(root_node);
         return code_runner;
     }
 
@@ -184,6 +187,15 @@ pub const CodeRunner = struct {
         // order important otherwise stdin etc. not initialized
         try self.runner.spawn();
 
+        // NOTE: afaict there are no better ways to determine if an executable is on the PATH
+        // than try to run it, since on Windows checking all dirs on PATH is not sufficient
+        // since there might be regex entries that influence it etc.
+        // (which std.ChildProcess.spawn isn't even doing though, but this is stil prob the
+        //  most sane way)
+        // That's why we delay the work of merging to code etc. till after we spawned the
+        // process
+        try self.gather_code_blocks(self.root_node);
+
         // write program code to stdin
         try self.runner.stdin.?.writer().writeAll(self.merged_code.items);
         self.runner.stdin.?.close();
@@ -203,6 +215,8 @@ pub const CodeRunner = struct {
         errdefer allocator.free(stderr);
         log.debug("Done reading from stderr!\n", .{});
 
+        // NOTE: on POSIX the availability of the executable is apparently not checked
+        // when spawning the process, it's delayed till we .wait() on it
         const term = try self.runner.wait();
         log.debug("Done waiting on code execution child: {s} result {any}!\n",
                   .{ @tagName(self.lang), term });

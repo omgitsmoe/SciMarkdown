@@ -100,7 +100,7 @@ pub const Parser = struct {
         try parser.token_buf.append(try parser.tokenizer.get_token());
 
         // create() returns ptr to undefined memory
-        var current_document = try Node.create(allocator);
+        var current_document = try Node.create(&parser.node_arena.allocator);
         current_document.data = .Document;
         parser.current_document = current_document;
         parser.open_blocks[0] = current_document;
