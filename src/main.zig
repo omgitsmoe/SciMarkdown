@@ -71,16 +71,16 @@ pub fn main() !void {
     if (args.flag("--help") or args.positionals().len != 1) {
         const writer = std.io.getStdErr().writer();
         if (builtin.os.tag == .windows) {
-            _ = try writer.write("Usage: pistis.exe ");
+            try writer.writeAll("Usage: scimd.exe ");
         } else {
-            _ = try writer.write("Usage: pistis ");
+            try writer.writeAll("Usage: scimd ");
         }
 
         try clap.usage(writer, &params);
-        _ = try writer.write("\n");
+        try writer.writeByte('\n');
         try clap.help(writer, &params);
 
-        std.process.exit(0);
+        std.process.exit(1);
     }
 
     const pos_args = args.positionals();
@@ -169,7 +169,7 @@ pub fn main() !void {
         }
     }
 
-    var html_gen = HTMLGenerator.init(allocator, parser.current_document, parser.label_ref_map);
+    var html_gen = HTMLGenerator.init(allocator, parser.current_document, parser.label_node_map);
 
     var file: std.fs.File = undefined;
     if (std.fs.path.isAbsolute(out_filename)) {

@@ -10,23 +10,23 @@ const NodeKind = ast.NodeKind;
 pub const HTMLGenerator = struct {
     allocator: *std.mem.Allocator,
     start_node: *Node,
-    label_ref_map: std.StringHashMap(*Node.LinkData),
+    label_node_map: std.StringHashMap(*Node.NodeData),
 
     pub const Error = error {
         ReferenceLabelNotFound,
         FormatBufferTooSmall,
     };
 
-    /// label_ref_map is taken from the parser, but HTMLGenerator doesn't take ownership
+    /// label_node_map is taken from the parser, but HTMLGenerator doesn't take ownership
     pub fn init(
         allocator: *std.mem.Allocator,
         start_node: *Node,
-        label_ref_map: std.StringHashMap(*Node.LinkData)
+        label_node_map: std.StringHashMap(*Node.NodeData)
     ) HTMLGenerator {
         return HTMLGenerator{
             .allocator = allocator,
             .start_node = start_node,
-            .label_ref_map = label_ref_map,
+            .label_node_map = label_node_map,
         };
     }
 
@@ -237,10 +237,10 @@ pub const HTMLGenerator = struct {
                     } else {
                         // look up reference by label; must have one if url is null
                         // returns optional ptr to entry
-                        const maybe_ref = self.label_ref_map.get(link.label.?);
+                        const maybe_ref = self.label_node_map.get(link.label.?);
                         if (maybe_ref) |ref| {
-                            link_url = ref.url.?;
-                            link_title = ref.title;
+                            link_url = ref.LinkRef.url.?;
+                            link_title = ref.LinkRef.title;
                         } else {
                             HTMLGenerator.report_error(
                                 "No reference definition could be found for label '{s}'!\n",
@@ -272,10 +272,10 @@ pub const HTMLGenerator = struct {
                     } else {
                         // look up reference by label; must have one if url is null
                         // returns optional ptr to entry
-                        const maybe_ref = self.label_ref_map.get(img.label.?);
+                        const maybe_ref = self.label_node_map.get(img.label.?);
                         if (maybe_ref) |ref| {
-                            img_url = ref.url.?;
-                            img_title = ref.title;
+                            img_url = ref.LinkRef.url.?;
+                            img_title = ref.LinkRef.title;
                         } else {
                             HTMLGenerator.report_error(
                                 "No reference definition could be found for label '{s}'!\n",
@@ -306,6 +306,21 @@ pub const HTMLGenerator = struct {
                             try out_stream.writeAll("<span id=\"");
                             try out_stream.writeAll(call.result.?.label);
                             try out_stream.writeAll("\"></span>");
+                        },
+                        .ref => {
+                            const maybe_node = self.label_node_map.get(call.result.?.ref);
+                            if (maybe_node) |node| {
+                                try out_stream.writeAll("<a href=\"#");
+                                try out_stream.writeAll(call.result.?.ref);
+                                try out_stream.writeAll("\">");
+                                try out_stream.writeAll(@tagName(node.*));
+                                try out_stream.writeAll("</a>");
+                            } else {
+                                HTMLGenerator.report_error(
+                                    "No corresponding label could be found for ref '{s}'!\n",
+                                    .{ call.result.?.ref });
+                                return Error.ReferenceLabelNotFound;
+                            }
                         },
                         else => {},
                     }

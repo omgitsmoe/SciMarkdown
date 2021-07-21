@@ -26,7 +26,7 @@ pub const Parser = struct {
     node_arena: std.heap.ArenaAllocator,
     string_arena: std.heap.ArenaAllocator,
 
-    label_ref_map: std.StringHashMap(*Node.LinkData),
+    label_node_map: std.StringHashMap(*Node.NodeData),
     citations:     std.ArrayList(*Node),
 
     run_languages: LangSet,
@@ -45,6 +45,7 @@ pub const Parser = struct {
     /// these are not blocks in the markdown sense but rather parent nodes
     /// in general
     /// first open_block is always current_document
+    // TODO use an ArrayList instead?
     open_blocks: [50]*Node,
     open_block_idx: u8,
 
@@ -65,6 +66,7 @@ pub const Parser = struct {
     // you toward completing the set. 
     // e.g. changing !void to ParseError!void gives the error msg:
     // not a member of destination error set error{OutOfMemory}
+    // TODO go over use of SyntaxError and specific ones
     const ParseError = error {
         OutOfMemory,
         SyntaxError,
@@ -80,7 +82,7 @@ pub const Parser = struct {
             .node_arena = std.heap.ArenaAllocator.init(allocator),
             .string_arena = std.heap.ArenaAllocator.init(allocator),
 
-            .label_ref_map = std.StringHashMap(*Node.LinkData).init(allocator),
+            .label_node_map = std.StringHashMap(*Node.NodeData).init(allocator),
             .citations     = std.ArrayList(*Node).init(allocator),
 
             .run_languages = LangSet.init(.{}),
@@ -114,7 +116,7 @@ pub const Parser = struct {
         self.node_arena.deinit();
         self.tokenizer.deinit();
         self.token_buf.deinit();
-        self.label_ref_map.deinit();
+        self.label_node_map.deinit();
         self.citations.deinit();
     }
 
@@ -672,17 +674,18 @@ pub const Parser = struct {
                 };
                 self.open_block(reference_def);
 
-                // store entry in label_ref_map with the label as key and the *Node as value
+                // store entry in label_node_map with the label as key and the *Node as value
                 // make sure we don't have a duplicate label!
-                const entry_found = try self.label_ref_map.getOrPut(reference_def.data.LinkRef.label.?);
+                const entry_found = try self.label_node_map.getOrPut(reference_def.data.LinkRef.label.?);
                 // ^ result will be a struct with a pointer to the HashMap.Entry and a bool
                 // whether an existing value was found
                 if (entry_found.found_existing) {
-                    Parser.report_error("ln:{}: Duplicate reference label!\n", .{ self.peek_token().line_nr });
+                    Parser.report_error("ln:{}: Duplicate reference label '{s}'!\n",
+                                        .{ self.peek_token().line_nr, reference_def.data.LinkRef.label.? });
                     return ParseError.SyntaxError;
                 } else {
                     // actually write entry value (key was already written by getOrPut)
-                    entry_found.value_ptr.* = &reference_def.data.LinkRef;
+                    entry_found.value_ptr.* = &reference_def.data;
                 }
 
                 try self.parse_link_destination();
@@ -1873,20 +1876,36 @@ pub const Parser = struct {
             return ParseError.SyntaxError;
         }
 
-        const result = bic.evaluate_builtin(
-            &self.node_arena.allocator, builtin, mb_builtin_type.?, .{}) catch {
+        try self.execute_builtin(builtin, mb_builtin_type.?, .{});
+    }
+
+
+    fn execute_builtin(
+        self: *Parser, 
+        builtin_node: *ast.Node,
+        builtin_type: BuiltinCall,
+        data: anytype,
+    ) ParseError!void {
+        const allocator = &self.node_arena.allocator;
+        const result = bic.evaluate_builtin(allocator, builtin_node, builtin_type, .{}) catch {
             return ParseError.BuiltinCallFailed;
         };
+        if (bic.builtin_call_info[@enumToInt(builtin_type)].persistent) {
+            const persistent = try allocator.create(bic.BuiltinResult);
+            persistent.* = result;
+            builtin_node.data.BuiltinCall.result = persistent;
+        }
+
         switch (result) {
             .cite, .textcite, .cites => {
-                // save the result in the node if we're the top level call
-                const persistent = try self.node_arena.allocator.create(bic.BuiltinResult);
-                persistent.* = result;
-                builtin.data.BuiltinCall.result = persistent;
-
                 // store citation nodes for passing them to citeproc and replacing them
                 // with actual citation nodes
-                try self.citations.append(builtin);
+                // NOTE: only store top-level citation calls (otherwise we get duplicate
+                // output for .cites etc.)
+                switch (self.get_last_block().data) {
+                    .BuiltinCall, .PostionalArg, .KeywordArg => {},
+                    else => try self.citations.append(builtin_node),
+                }
             },
             .bibliography => {
                 if (self.bibliography) |bib_node| {
@@ -1896,12 +1915,25 @@ pub const Parser = struct {
 
                 self.bibliography = result.bibliography;
             },
+            // TODO should these (or all builtin results?) be their own NodeData?
             .label => {
-                const persistent = try self.node_arena.allocator.create(bic.BuiltinResult);
-                persistent.* = result;
-                builtin.data.BuiltinCall.result = persistent;
+                const entry_found = try self.label_node_map.getOrPut(result.label);
+                // ^ result will be a struct with a pointer to the HashMap.Entry and a bool
+                // whether an existing value was found
+                if (entry_found.found_existing) {
+                    Parser.report_error("ln:{d}: Duplicate label '{s}'!\n",
+                                        .{ self.peek_token().line_nr, result.label });
+                    return ParseError.SyntaxError;
+                } else {
+                    // actually write entry value (key was already written by getOrPut)
+                    const parent = self.get_last_block();
+                    std.debug.assert(parent.data != .BuiltinCall and parent.data != .PostionalArg and
+                        parent.data != .KeywordArg);
+                    entry_found.value_ptr.* = &parent.data;
+                }
             },
             else => {},
         }
+
     }
 };

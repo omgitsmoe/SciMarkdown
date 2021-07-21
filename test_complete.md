@@ -240,14 +240,17 @@ plt.ylabel('some numbers')
 print("second print")
 ```
 
+%% uncomment python code below to see the traceback being properly output
+%% on the command line
 ```python
-a = 5 + 'a'
+# a = 5 + 'a'
 ```
 
+%% same for R
 ```r
-d <- function(x) { x + 'a' }
-f <- function(x) { d(x) }
-a = f(5)
+# d <- function(x) { x + 'a' }
+# f <- function(x) { d(x) }
+# a = f(5)
 ```
 
 Python inline: >`py print("printed from within python")`
@@ -356,15 +359,27 @@ This line is also a separate paragraph, but...
 This line is only separated by a single newline or space, so it's a separate line in the *same paragraph*.
 
 
-## Labels @label(h:labels)
+## Labels and References @label(h:labels)
 
-You can label the environment/block you're inside of by using the builtin `@label(label text)`
+%% TOOD allow linking to paragraphs etc or only allow headings, figures, etc.?
+@label(para) You can label the environment/block you're inside of by using the builtin `@label(label text)`
 
 1. @label(ol:one)
    First ordered list item
    multi-line [link
    text wrap](https://google.com)
    but this will still be rendered on one line
+
+To cross-reference a label use the builtin `@ref(label text)`:
+- See section @ref(h:labels)
+- Listing @ref(ol:one)
+- Python @ref(first-python-code-block)
+- Para @ref(para)
+- Below ref use @ref(h:below-ref)
+
+### Below @label(h:below-ref)
+
+Position of label/ref in relation to each other does not matter!
 
 
 ## Citations

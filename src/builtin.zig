@@ -3,6 +3,7 @@ const log = std.log;
 
 const csl = @import("csl_json.zig");
 const ast = @import("ast.zig");
+const Parser = @import("parser.zig").Parser;
 
 pub const BuiltinCall = enum {
     cite = 0,
@@ -11,23 +12,29 @@ pub const BuiltinCall = enum {
     bibliography,
     sc,
     label,
+    ref,
 };
 
 pub const BuiltinCallInfo = struct {
     // 0 -> varargs
     pos_params: i16,
     kw_params:  u16,
+    // whether BuiltinResult should be allocated and stored persistently
+    persistent: bool,
 };
 
 pub const builtin_call_info = [_]BuiltinCallInfo {
-    .{ .pos_params =  1, .kw_params = 4 },  // cite
-    .{ .pos_params =  1, .kw_params = 4 },  // textcite
-    .{ .pos_params = -1, .kw_params = 0 },  // cites
-    .{ .pos_params =  0, .kw_params = 0 },  // bibliography
-    .{ .pos_params =  1, .kw_params = 0 },  // sc
-    .{ .pos_params =  1, .kw_params = 0 },  // label
+    .{ .pos_params =  1, .kw_params = 4, .persistent = true },  // cite
+    .{ .pos_params =  1, .kw_params = 4, .persistent = true },  // textcite
+    .{ .pos_params = -1, .kw_params = 0, .persistent = true },  // cites
+    .{ .pos_params =  0, .kw_params = 0, .persistent = false },  // bibliography
+    .{ .pos_params =  1, .kw_params = 0, .persistent = false },  // sc
+    .{ .pos_params =  1, .kw_params = 0, .persistent = true },  // label
+    .{ .pos_params =  1, .kw_params = 0, .persistent = true },  // ref
 };
 
+// TODO @CleanUp should this be a sep tag and union, since the result is optional we never
+// use the tagged union properly, only the payload and tag separately
 pub const BuiltinResult = union(BuiltinCall) {
     cite: csl.CitationItem,
     // citeproc doesn't propely support \textcite behaviour from biblatex where
@@ -40,6 +47,7 @@ pub const BuiltinResult = union(BuiltinCall) {
     bibliography: *ast.Node,
     sc,
     label: []const u8,
+    ref:   []const u8,
 };
 
 pub const Error = error {
@@ -53,11 +61,10 @@ pub const Error = error {
 // anytype means we can pass anonymous structs like: .{ .parser = self, .. }
 // checkted at compile time (aka "comptime duck-typing")
 /// expects that the correct amount of positional arguments are already validated by parse_builtin
-/// HAS to be called with parser's node_arena.allocator
 /// evaluate_builtin and derivatives are expected to clean up the argument nodes
 /// so that only the builtin_node itself OR the result nodes remain!
 pub fn evaluate_builtin(
-    allocator: *std.mem.Allocator,
+    allocator: *std.mem.Allocator, 
     builtin_node: *ast.Node,
     builtin_type: BuiltinCall,
     data: anytype
@@ -172,6 +179,15 @@ pub fn evaluate_builtin(
             // not neccessary/effective since we require to be called with the node
             // ArenaAllocator (and freeing allocations has no effect unless it's the
             // last allocation)
+            only_arg.delete_direct_children(allocator);
+            allocator.destroy(only_arg);
+            builtin_node.first_child = null;
+        },
+        .ref => {
+            var only_arg = builtin_node.first_child.?;
+            result = .{
+                .ref = only_arg.first_child.?.data.Text.text,
+            };
             only_arg.delete_direct_children(allocator);
             allocator.destroy(only_arg);
             builtin_node.first_child = null;
