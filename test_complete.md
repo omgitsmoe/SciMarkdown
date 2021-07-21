@@ -283,7 +283,12 @@ if s == "":
 ## Math
 
  When $a \ne 0$, there are two solutions to $ax^2 + bx + c = 0$ and they are:
- $$ x = {-b \pm \sqrt{b^2-4ac} \over 2a}. $$
+ $$
+ @label(eq:1)
+ x = {-b \pm \sqrt{b^2-4ac} \over 2a}.
+ $$
+
+ See @ref(eq:1)
 
  Digits that immediately follow a \$ sign will not start an inline math span
  so prices like $50 etc. don't have to be escaped!
@@ -361,7 +366,6 @@ This line is only separated by a single newline or space, so it's a separate lin
 
 ## Labels and References @label(h:labels)
 
-%% TOOD allow linking to paragraphs etc or only allow headings, figures, etc.?
 @label(para) You can label the environment/block you're inside of by using the builtin `@label(label text)`
 
 1. @label(ol:one)

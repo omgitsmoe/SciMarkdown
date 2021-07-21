@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const log = std.log;
 
 const utils = @import("utils.zig");
@@ -267,6 +268,25 @@ pub const Parser = struct {
         }
 
         return skipped;
+    }
+
+    fn skip_until_token(
+        self: *@This(),
+        comptime token_kind: TokenKind,
+        comptime extra_msg: []const u8
+    ) ParseError!void {
+        const start = self.peek_token();
+        var ctoken_kind = start.token_kind;
+        while (ctoken_kind != token_kind and ctoken_kind != .Eof) : ({
+            self.eat_token();
+            ctoken_kind = self.peek_token().token_kind;
+        }) { }
+        if (ctoken_kind == .Eof) {
+            Parser.report_error(
+                "ln:{}: Encountered end of file{s} while waiting for token {s}",
+                .{ start.line_nr, extra_msg, token_kind.name() });
+            return ParseError.SyntaxError;
+        }
     }
 
     fn parse_block(self: *Parser, indent_change: i8, prev_line_blank: bool) ParseError!void {
@@ -561,26 +581,7 @@ pub const Parser = struct {
                 // mark language for running it later
                 self.run_languages.insert(code_node.data.FencedCode.language);
 
-                // allow builtin calls immediately after the first newline with each
-                // builtin being separated by exactly one newline
-                var tok_kind = self.peek_token().token_kind;
-                const require_extra_newline = if (tok_kind == .Builtin_call) true else false;
-                while (true) : ( tok_kind = self.peek_token().token_kind ) {
-                    if (tok_kind == .Builtin_call) {
-                        try self.parse_builtin(self.peek_token());
-                        try self.require_token(
-                            .Newline, " after builtin call before the code of a FencedCode block!");
-                        self.eat_token();
-                    } else {
-                        if (require_extra_newline) {
-                            // require two newlines after the last builtin call
-                            try self.require_token(
-                                .Newline, " after the last builtin call inside of a FencedCode block!");
-                            self.eat_token();
-                        }
-                        break;
-                    }
-                }
+                try self.parse_builtins_at_start_of_block(.FencedCode);
 
                 log.debug("Found code block ln{}: lang_name {s}\n",
                     .{ self.peek_token().line_nr, @tagName(code_node.data.FencedCode.language) });
@@ -593,26 +594,25 @@ pub const Parser = struct {
                     NodeKind.MathMultiline, self.peek_token().column, prev_line_blank);
 
                 self.eat_token();
-                var ctoken = self.peek_token();
-                const math_start = ctoken;
-                while (ctoken.token_kind != TokenKind.Dollar_double) : ({
-                    self.eat_token();
-                    ctoken = self.peek_token();
-                }) {
-                    if (ctoken.token_kind == TokenKind.Eof) {
-                        Parser.report_error(
-                            "ln:{}: Encountered end of file inside math environment ($$...$$)",
-                            .{ math_start.line_nr });
-                        return ParseError.SyntaxError;
-                    }
-                }
+
+                try self.require_token(.Newline, " after math equation block starter!");
+                self.eat_token();
 
                 const math_node = try self.new_node(self.get_last_block());
                 math_node.data = .{
                     .MathMultiline = .{ 
-                        .text = self.tokenizer.bytes[math_start.start..self.peek_token().start]
+                        .text = undefined,
                     }
                 };
+                self.open_block(math_node);  // so parents of present builtins are set properly
+                try self.parse_builtins_at_start_of_block(.MathMultiline);
+
+                const math_start = self.peek_token();
+                try self.skip_until_token(.Dollar_double, " inside math environment ($$...$$)");
+
+                math_node.data.MathMultiline.text = 
+                    self.tokenizer.bytes[math_start.start..self.peek_token().start];
+                self.close_last_block();
                 self.eat_token();  // eat closing $$
 
                 log.debug("ln:{}: Math env: $${s}$$\n",
@@ -707,20 +707,10 @@ pub const Parser = struct {
                 };
                 self.open_block(img_node);
 
-                var token = self.peek_token();
-                const alt_start = token;
-                while (token.token_kind != TokenKind.Close_bracket) {
-                    if (token.token_kind == TokenKind.Eof) {
-                        Parser.report_error(
-                            "ln:{}: Encountered end of file inside image alt text block '[...]'!\n",
-                            .{ alt_start.line_nr });
-                        return ParseError.SyntaxError;
-                    }
-                    self.eat_token();
-                    token = self.peek_token();
-                }
-                self.eat_token();
-                const alt_end = token;
+                const alt_start = self.peek_token();
+                try self.skip_until_token(.Close_bracket, " inside image alt text '[...]'");
+                const alt_end = self.peek_token();
+                self.eat_token(); // eat ]
                 img_node.data.Image.alt = self.tokenizer.bytes[alt_start.start .. alt_end.start];
 
                 switch (self.peek_token().token_kind) {
@@ -785,6 +775,33 @@ pub const Parser = struct {
             else => {
                 try self.parse_paragraph(prev_line_blank);
             },
+        }
+    }
+
+    fn parse_builtins_at_start_of_block(self: *@This(), comptime block_kind: NodeKind) ParseError!void {
+        // allow builtin calls immediately after the first newline with each
+        // builtin being separated by exactly one newline
+        var tok_kind = self.peek_token().token_kind;
+        const require_extra_newline = false;
+        while (true) : ( tok_kind = self.peek_token().token_kind ) {
+            if (tok_kind == .Builtin_call) {
+                try self.parse_builtin(self.peek_token());
+                try self.require_token(
+                    .Newline,
+                    " after builtin call before the code of a " ++
+                    @tagName(block_kind) ++ " block!");
+                self.eat_token();
+            } else {
+                if (require_extra_newline) {
+                    // require two newlines after the last builtin call
+                    try self.require_token(
+                        .Newline,
+                        " after the last builtin call inside of a " ++
+                        @tagName(block_kind) ++ " block!");
+                    self.eat_token();
+                }
+                break;
+            }
         }
     }
 
@@ -1284,21 +1301,8 @@ pub const Parser = struct {
                 }
                 self.eat_token();
 
-                var ctoken = self.peek_token();
-                const inline_math_start = ctoken;
-                while (ctoken.token_kind != TokenKind.Dollar) : ({
-                    // while continue expression (executed on every loop as well as when a 
-                    // continue happens)
-                    self.eat_token();
-                    ctoken = self.peek_token();
-                }) {
-                    if (ctoken.token_kind == TokenKind.Eof) {
-                        Parser.report_error(
-                            "ln:{}: Encountered end of file inside inline math ($...$)",
-                            .{ inline_math_start.line_nr });
-                        return ParseError.SyntaxError;
-                    }
-                }
+                const inline_math_start = self.peek_token();
+                try self.skip_until_token(.Dollar, " inside iniline math ($...$)");
 
                 const math_node = try self.new_node(self.get_last_block());
                 math_node.data = .{
@@ -1406,22 +1410,10 @@ pub const Parser = struct {
         // start of link label referring to a reference definition
         self.eat_token();
 
-        var token = self.peek_token();
-        const start_token = token;
-        while (true) {
-            if (token.token_kind == TokenKind.Close_bracket) {
-                self.eat_token();
-                break;
-            } else if (token.token_kind == TokenKind.Eof) {
-                Parser.report_error(
-                    "ln:{}: Encountered end-of-file inside {s} label brackets\n",
-                    .{ token.line_nr, @tagName(kind) });
-                return ParseError.SyntaxError;
-            }
-            self.eat_token();
-            token = self.peek_token();
-        }
-        const label_end = token.start;
+        const start_token = self.peek_token();
+        try self.skip_until_token(.Close_bracket, " inside " ++ @tagName(kind) ++ " label brackets");
+        const label_end = self.peek_token().start;
+        self.eat_token(); // eat ]
         return self.tokenizer.bytes[start_token.start..label_end];
     }
 
@@ -1516,27 +1508,17 @@ pub const Parser = struct {
             .{ self.peek_token().line_nr , @tagName(self.get_last_block().data) });
         if (ended_on_link_title) {
             self.eat_token();  // eat "
-            token = self.peek_token();
-            const link_title_start = token;
 
-            while (token.token_kind != TokenKind.Double_quote) {
-                if (token.token_kind == TokenKind.Eof) {
-                    Parser.report_error("ln:{}: Missing closing '\"' in link title\n",
-                                        .{ link_title_start.line_nr });
-                    return ParseError.SyntaxError;
-                }
-
-                self.eat_token();
-                token = self.peek_token();
-            }
-            const link_title_end = token;
+            const link_title_start = self.peek_token().start;
+            try self.skip_until_token(.Double_quote, " inside link title");
+            const link_title_end = self.peek_token().start;
             self.eat_token();  // eat "
 
             try self.require_token(TokenKind.Close_paren,
                                    ". Link destination needs to be enclosed in parentheses!");
             self.eat_token();  // eat )
             
-            if (link_title_start.start == link_title_end.start) {
+            if (link_title_start == link_title_end) {
                 Parser.report_error("ln:{}: Empty link title\n",
                                     .{ token_url_end.line_nr });
                 return ParseError.SyntaxError;
@@ -1547,11 +1529,11 @@ pub const Parser = struct {
                 // |value| is just a copy so we need to capture the ptr to modify it
                 .Link, .LinkRef => |*value| {
                     value.*.url = self.tokenizer.bytes[token_url_start.start..token_url_end.start];
-                    value.*.title = self.tokenizer.bytes[link_title_start.start..link_title_end.start];
+                    value.*.title = self.tokenizer.bytes[link_title_start..link_title_end];
                 },
                 .Image => |*value| {
                     value.*.url = self.tokenizer.bytes[token_url_start.start..token_url_end.start];
-                    value.*.title = self.tokenizer.bytes[link_title_start.start..link_title_end.start];
+                    value.*.title = self.tokenizer.bytes[link_title_start..link_title_end];
                 },
                 else => unreachable,
             }
@@ -1571,7 +1553,23 @@ pub const Parser = struct {
             }
         }
 
-        log.debug("Link dest: {}\n", .{ link_or_ref.data });
+        if (builtin.mode == .Debug) {
+            switch (link_or_ref.data) {
+                .Link, .LinkRef => |link| {
+                    log.debug("Link dest:", .{});
+                    if (link.label) |label| log.debug("label {s}", .{ label });
+                    if (link.url) |url| log.debug("url {s}", .{ url });
+                    if (link.title) |title| log.debug("title {s}", .{ title });
+                },
+                .Image => |img| {
+                    log.debug("Image dest:", .{});
+                    if (img.label) |label| log.debug("label {s}", .{ label });
+                    if (img.url) |url| log.debug("url {s}", .{ url });
+                    if (img.title) |title| log.debug("title {s}", .{ title });
+                },
+                else => unreachable,
+            }
+        }
     }
 
     inline fn skip_after_param(self: *Parser) !void {
@@ -1605,14 +1603,14 @@ pub const Parser = struct {
             .Open_paren, ". Calling a builtin should look like: @builtin(arg, kwarg=..)\n");
         self.eat_token();
         
-        var builtin = try self.new_node(self.get_last_block());
+        var builtin_node = try self.new_node(self.get_last_block());
 
         // start + 1 since the @ is included
         const keyword = self.tokenizer.bytes[start_token.start + 1..start_token.end];
         const mb_builtin_type = std.meta.stringToEnum(BuiltinCall, keyword);
         log.debug("Builtin type: {}", .{ mb_builtin_type });
         if (mb_builtin_type) |bi_type| {
-            builtin.data = .{
+            builtin_node.data = .{
                 .BuiltinCall = .{ .builtin_type = bi_type }
             };
         } else {
@@ -1621,9 +1619,9 @@ pub const Parser = struct {
                 .{ start_token.line_nr, keyword });
             return ParseError.SyntaxError;
         }
-        self.open_block(builtin);
+        self.open_block(builtin_node);
 
-        var current_arg = try self.new_node(builtin);
+        var current_arg = try self.new_node(builtin_node);
         current_arg.data = .PostionalArg;
         self.open_block(current_arg);
 
@@ -1705,7 +1703,7 @@ pub const Parser = struct {
                             last_end = tok.end;
                             pos_params += 1;
 
-                            current_arg = try self.new_node(builtin);
+                            current_arg = try self.new_node(builtin_node);
                             current_arg.data = .PostionalArg;
                             self.open_block(current_arg);
 
@@ -1802,7 +1800,7 @@ pub const Parser = struct {
                             kw_params += 1;
                             self.last_text_node = null;
 
-                            current_arg = try self.new_node(builtin);
+                            current_arg = try self.new_node(builtin_node);
                             self.open_block(current_arg);
                             current_arg.data = .{
                                 .KeywordArg = .{
@@ -1861,7 +1859,7 @@ pub const Parser = struct {
             "ln:{}: Finished builtin: {s} pos: {}, kw: {}",
             .{ start_token.line_nr, self.tokenizer.bytes[start_token.start..start_token.end],
                pos_params, kw_params });
-        builtin.print_tree();
+        builtin_node.print_tree();
 
         const bc_info = builtin_call_info[@enumToInt(mb_builtin_type.?)];
         if (bc_info.pos_params >= 0 and pos_params != bc_info.pos_params) {
@@ -1876,7 +1874,7 @@ pub const Parser = struct {
             return ParseError.SyntaxError;
         }
 
-        try self.execute_builtin(builtin, mb_builtin_type.?, .{});
+        try self.execute_builtin(builtin_node, mb_builtin_type.?, .{});
     }
 
 

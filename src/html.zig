@@ -142,6 +142,7 @@ pub const HTMLGenerator = struct {
                     try out_stream.writeAll("\\)");
                 },
                 .MathMultiline => |math| {
+                    if (!node_info.is_end) continue;
                     try out_stream.writeAll("$$");
                     try out_stream.writeAll(math.text);
                     try out_stream.writeAll("$$\n");

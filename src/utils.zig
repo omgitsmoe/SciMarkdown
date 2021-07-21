@@ -131,7 +131,6 @@ pub fn unionPayloadPtr(comptime T: type, union_ptr: anytype) ?*T {
     inline for (@typeInfo(U).Union.fields) |field, i| {
         if (field.field_type != T)
             continue;
-        std.debug.print("Ptrint: {d}\n", .{ @enumToInt(union_ptr.*) });
         if (@enumToInt(union_ptr.*) == i)
             return &@field(union_ptr, field.name);
     }
