@@ -170,8 +170,12 @@ pub const BibParser = struct {
     fn skip_whitespace(self: *BibParser, comptime eof_is_error: bool) Error!void {
         while (utils.is_whitespace(self.peek_byte())) {
             self.advance_to_next_byte() catch {
-                BibParser.report_error("Hit EOF while skipping whitespace!\n", .{});
-                return Error.EndOfFile;
+                if (eof_is_error) {
+                    BibParser.report_error("Hit EOF while skipping whitespace!\n", .{});
+                    return Error.EndOfFile;
+                } else {
+                    return;
+                }
             };
         }
     }

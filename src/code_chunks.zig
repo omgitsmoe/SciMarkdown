@@ -4,7 +4,7 @@ const DFS = @import("utils.zig").DepthFirstIterator;
 const log = std.log;
 
 pub const Language = enum {
-    Unknown = 0,
+    Unknown,
     Python,
     R,
     Julia,

@@ -6,7 +6,7 @@ const ast = @import("ast.zig");
 const Parser = @import("parser.zig").Parser;
 
 pub const BuiltinCall = enum {
-    cite = 0,
+    cite,
     textcite,
     cites,
     bibliography,
@@ -204,6 +204,8 @@ pub fn evaluate_builtin_textcite(
     builtin_type: BuiltinCall,
     data: anytype
 ) Error![2]csl.CitationItem {
+    _ = builtin_type;
+    _ = data;
     // TODO fix kwargs on textcite since we use two separate cites to emulate a real textcite
     // the pre/post/etc get printed twice
     var cite_author_only = try evaluate_builtin_cite(builtin_node, .textcite, data);
@@ -220,6 +222,7 @@ pub fn evaluate_builtin_cite(
     builtin_type: BuiltinCall,
     data: anytype
 ) Error!csl.CitationItem {
+    _ = data;
     // return BuiltinResult here as well?
     // var result: BuiltinResult = undefined;
 

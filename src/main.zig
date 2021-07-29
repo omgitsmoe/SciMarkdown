@@ -17,7 +17,7 @@ pub fn main() !void {
     // takes a config struct (empty here .{})
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer {
-        const leaked = gpa.deinit();
+        _ = gpa.deinit();
         // print takes a format string and a struct
         // prints automatically std.debug.print("Leak detected: {}\n", .{leaked});
     }

@@ -117,7 +117,7 @@ pub const Node = struct {
                     // iter over actual payload type fields (assuming it's a struct)
                     switch (@typeInfo(union_field.field_type)) {
                         .Struct => |fT| {
-                            inline for (fT.fields) |ft_field, ft_enum| {
+                            inline for (fT.fields) |ft_field| {
                                 std.debug.print(".{s} = ", .{ ft_field.name });
                                 // print as str if type is []const u8
                                 // necessary due to zig's recent change to just print []u8 as actual u8

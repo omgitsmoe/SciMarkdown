@@ -59,7 +59,7 @@ pub fn bib_to_csl_json(
                     if (std.ascii.isAlpha(c)) {
                         break :blk true;
                     }
-                } else blk: { break :blk false; };
+                } else eblk: { break :eblk false; };
 
                 if (contains_alpha) {
                     // convert to number

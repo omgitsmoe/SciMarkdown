@@ -1884,6 +1884,10 @@ pub const Parser = struct {
         builtin_type: BuiltinCall,
         data: anytype,
     ) ParseError!void {
+        // zig 0.9dev does not allow unused variables/parameters anymore, the intended use is
+        // to "annotate" them like this (https://github.com/ziglang/zig/issues/9296)
+        _ = data;
+
         const allocator = &self.node_arena.allocator;
         const result = bic.evaluate_builtin(allocator, builtin_node, builtin_type, .{}) catch {
             return ParseError.BuiltinCallFailed;
@@ -1906,7 +1910,7 @@ pub const Parser = struct {
                 }
             },
             .bibliography => {
-                if (self.bibliography) |bib_node| {
+                if (self.bibliography != null) {
                     Parser.report_error("Only one bibliography allowed currently!\n", .{});
                     return ParseError.SyntaxError;
                 }
