@@ -12,6 +12,7 @@ pub const ExampleArgIterator = struct {
     const Error = error{};
 
     pub fn next(iter: *ExampleArgIterator) Error!?[]const u8 {
+        _ = iter;
         return "2";
     }
 };
@@ -252,7 +253,12 @@ pub const ShellIterator = struct {
         }
     }
 
-    fn result(iter: *ShellIterator, start: usize, end: usize, list: *std.ArrayList(u8)) Error!?[]const u8 {
+    fn result(
+        iter: *ShellIterator,
+        start: usize,
+        end: usize,
+        list: *std.ArrayList(u8),
+    ) Error!?[]const u8 {
         const res = iter.str[start..end];
 
         // If we already have something in `list` that means that we could not
