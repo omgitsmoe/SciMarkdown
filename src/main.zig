@@ -4,6 +4,7 @@ const builtin = @import("builtin");
 
 const Parser = @import("parser.zig").Parser;
 const HTMLGenerator = @import("html.zig").HTMLGenerator;
+const PDFGenerator = @import("pdf.zig").PDFGenerator;
 const CodeRunner = @import("code_chunks.zig").CodeRunner;
 const cite = @import("cite.zig");
 const run_citeproc = cite.run_citeproc;
@@ -169,7 +170,8 @@ pub fn main() !void {
         }
     }
 
-    var html_gen = HTMLGenerator.init(allocator, parser.current_document, parser.label_node_map);
+    // var html_gen = HTMLGenerator.init(allocator, parser.current_document, parser.label_node_map);
+    var pdf_gen = PDFGenerator.init(allocator, parser.current_document, parser.label_node_map);
 
     var file: std.fs.File = undefined;
     if (std.fs.path.isAbsolute(out_filename)) {
@@ -187,6 +189,7 @@ pub fn main() !void {
     defer file.close();
 
     var out = std.io.bufferedWriter(file.writer());
-    try html_gen.write(@TypeOf(out), out.writer());
+    // try html_gen.write(@TypeOf(out), out.writer());
+    try pdf_gen.write(@TypeOf(out), out.writer());
     try out.flush();
 }
