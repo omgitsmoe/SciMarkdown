@@ -81,7 +81,7 @@ pub const CodeRunner = struct {
     fn gather_code_blocks(self: *CodeRunner, root_node: *ast.Node) !void {
         var dfs = DFS(ast.Node, true).init(root_node);
 
-        switch(self.lang) {
+        switch (self.lang) {
             .Python => try self.merged_code.appendSlice(python_helper),
             .R => try self.merged_code.appendSlice(r_helper),
             else => {},
@@ -150,7 +150,7 @@ pub const CodeRunner = struct {
             }
         }
 
-        switch(self.lang) {
+        switch (self.lang) {
             .Python => try self.merged_code.appendSlice(
                 \\
                 \\sys.exit(0)
@@ -168,15 +168,14 @@ pub const CodeRunner = struct {
             else => {},
         }
 
-        log.debug(
-            "Lang: {s} Code generated: \n{s}\n---\n", .{ @tagName(self.lang), self.merged_code.items });
+        log.debug("Lang: {s} Code generated: \n{s}\n---\n", .{ @tagName(self.lang), self.merged_code.items });
     }
 
     pub fn run(self: *CodeRunner) !void {
         const allocator = &self.out_buf.allocator;
         const cmd = switch (self.lang) {
             .Python => &[_][]const u8{"python"},
-            .R => &[_][]const u8{"R", "--save", "--quiet", "--no-echo"},
+            .R => &[_][]const u8{ "R", "--save", "--quiet", "--no-echo" },
             else => return,
         };
         self.runner = try std.ChildProcess.init(cmd, allocator);
@@ -218,8 +217,10 @@ pub const CodeRunner = struct {
         // NOTE: on POSIX the availability of the executable is apparently not checked
         // when spawning the process, it's delayed till we .wait() on it
         const term = try self.runner.wait();
-        log.debug("Done waiting on code execution child: {s} result {any}!\n",
-                  .{ @tagName(self.lang), term });
+        log.debug(
+            "Done waiting on code execution child: {s} result {any}!\n",
+            .{ @tagName(self.lang), term },
+        );
 
         const success = switch (term) {
             .Exited => |code| if (code == 0) true else false,
@@ -238,7 +239,7 @@ pub const CodeRunner = struct {
                 },
             }
         } else {
-            std.debug.print("ERR: {s}\n", .{ stderr });
+            std.debug.print("ERR: {s}\n", .{stderr});
             // TODO should other stdout/err chunks also be printed for printf debugging?
             // execution failed, output the process' stderr
             var err_chunk: []const u8 = "No error message captured!";
@@ -246,12 +247,13 @@ pub const CodeRunner = struct {
                 .R, .Python => {
                     var iter = ChunkTextIterator.init(stderr, 0);
                     // assume error msg is contained in last chunk of stderr
-                    while (iter.next()) |chunk| { err_chunk = chunk; }
+                    while (iter.next()) |chunk| {
+                        err_chunk = chunk;
+                    }
                 },
                 else => {},
             }
-            log.err("Code execution failed for language {s}:\n{s}",
-                    .{ @tagName(self.lang), err_chunk });
+            log.err("Code execution failed for language {s}:\n{s}", .{ @tagName(self.lang), err_chunk });
         }
     }
 
@@ -259,7 +261,7 @@ pub const CodeRunner = struct {
         var iter = ChunkBinIterator.init(bytes, 0);
         var code_chunk: u16 = 0;
         while (iter.next()) |chunk| {
-            log.debug("\nCHUNK OUT:\n'''{s}'''\n----------\n", .{ chunk });
+            log.debug("\nCHUNK OUT:\n'''{s}'''\n----------\n", .{chunk});
             if (!is_err) {
                 if (chunk.len > 0)
                     self.code_datas.items[code_chunk].stdout = chunk;
@@ -275,7 +277,7 @@ pub const CodeRunner = struct {
         var iter = ChunkTextIterator.init(bytes, 0);
         var code_chunk: u16 = 0;
         while (iter.next()) |chunk| {
-            log.debug("\nCHUNK OUT:\n'''{s}'''\n----------\n", .{ chunk });
+            log.debug("\nCHUNK OUT:\n'''{s}'''\n----------\n", .{chunk});
 
             if (!is_err) {
                 if (chunk.len > 0)
@@ -310,13 +312,16 @@ pub const CodeRunner = struct {
 
             // chunk out length as text followed by ';'
             const text_len_start = i;
-            while (self.bytes[i] != ';') : ( i += 1 ) {}
+            while (self.bytes[i] != ';') : (i += 1) {}
             const text_len_end = i;
-            i += 1;  // skip ;
+            i += 1; // skip ;
             const chunk_out_len = std.fmt.parseUnsigned(
-                u32, self.bytes[text_len_start..text_len_end], 10) catch unreachable;
+                u32,
+                self.bytes[text_len_start..text_len_end],
+                10,
+            ) catch unreachable;
 
-            const chunk_out = self.bytes[i..i + chunk_out_len];
+            const chunk_out = self.bytes[i .. i + chunk_out_len];
             i += chunk_out_len;
             self.offset = i;
 
@@ -348,8 +353,8 @@ pub const CodeRunner = struct {
             // and u32 is 4-aligned
             // const chunk_out_len = @ptrCast(*const u32, @alignCast(@alignOf(u32), &stdout[i])).*;
             // just specify that the *u32 is 1-aligned
-            const chunk_out_len = @ptrCast(*align(1)const u32, &self.bytes[i]).*;
-            const chunk_out = self.bytes[i+4..i+4+chunk_out_len];
+            const chunk_out_len = @ptrCast(*align(1) const u32, &self.bytes[i]).*;
+            const chunk_out = self.bytes[i + 4 .. i + 4 + chunk_out_len];
             i += 4 + chunk_out_len;
             self.offset = i;
 

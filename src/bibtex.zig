@@ -10,7 +10,7 @@ pub const BibParser = struct {
     bytes: []const u8,
     allocator: *std.mem.Allocator,
 
-    pub const Error = error {
+    pub const Error = error{
         SyntaxError,
         OutOfMemory,
         EndOfFile,
@@ -57,7 +57,7 @@ pub const BibParser = struct {
     inline fn eat_until(self: *BibParser, end: u8) Error!void {
         while (self.peek_byte() != end) {
             self.advance_to_next_byte() catch {
-                BibParser.report_error("Reached EOF while waiting for '{c}'!\n", .{ end });
+                BibParser.report_error("Reached EOF while waiting for '{c}'!\n", .{end});
                 return Error.EndOfFile;
             };
         }
@@ -69,9 +69,28 @@ pub const BibParser = struct {
             switch (byte) {
                 // this is what btparse defines as name, but are that many special chars allowed?
                 // biber disallows " # ' ( ) , = { } %
-                'a'...'z', 'A'...'Z', '0'...'9',
-                '!', '$', '*', '+', '-', '.', '/', ':',
-                ';', '<', '>', '?', '[', ']', '^', '_', '`', '|' => {},
+                'a'...'z',
+                'A'...'Z',
+                '0'...'9',
+                '!',
+                '$',
+                '*',
+                '+',
+                '-',
+                '.',
+                '/',
+                ':',
+                ';',
+                '<',
+                '>',
+                '?',
+                '[',
+                ']',
+                '^',
+                '_',
+                '`',
+                '|',
+                => {},
                 else => break,
             }
             self.advance_to_next_byte() catch {
@@ -139,7 +158,9 @@ pub const BibParser = struct {
                 else => {
                     BibParser.report_error(
                         "Unexpected byte '{c}' expected either '@' followed by a valid " ++
-                        " entry type or '%' to start a line comment!\n", .{ byte });
+                            " entry type or '%' to start a line comment!\n",
+                        .{byte},
+                    );
                     return Error.SyntaxError;
                 },
             }
@@ -190,12 +211,15 @@ pub const BibParser = struct {
         }
         // convert to lower-case to match with enum tagNames
         const lowercased = try std.ascii.allocLowerString(
-            self.allocator, self.bytes[entry_type_start..self.idx]);
-        const entry_type = std.meta.stringToEnum(
-            EntryType, lowercased) orelse {
-                BibParser.report_error("'{s}' is not a valid entry type!\n",
-                                       .{ self.bytes[entry_type_start..self.idx] });
-                return Error.SyntaxError;
+            self.allocator,
+            self.bytes[entry_type_start..self.idx],
+        );
+        const entry_type = std.meta.stringToEnum(EntryType, lowercased) orelse {
+            BibParser.report_error(
+                "'{s}' is not a valid entry type!\n",
+                .{self.bytes[entry_type_start..self.idx]},
+            );
+            return Error.SyntaxError;
         };
         self.allocator.free(lowercased);
 
@@ -225,7 +249,7 @@ pub const BibParser = struct {
         // ^ result will be a struct with a pointer to the HashMap.Entry and a bool
         // whether an existing value was found
         if (entry_found.found_existing) {
-            BibParser.report_error("Duplicate label '{s}'!\n", .{ label });
+            BibParser.report_error("Duplicate label '{s}'!\n", .{label});
             return Error.DuplicateLabel;
         } else {
             // actually write entry value (key was already written by getOrPut)
@@ -259,7 +283,9 @@ pub const BibParser = struct {
 
         // convert to lower-case to match with enum tagNames
         const lowercased = try std.ascii.allocLowerString(
-            self.allocator, self.bytes[field_name_start..field_name_end]);
+            self.allocator,
+            self.bytes[field_name_start..field_name_end],
+        );
         const field_name = std.meta.stringToEnum(FieldName, lowercased) orelse .custom;
         self.allocator.free(lowercased);
 
@@ -272,7 +298,9 @@ pub const BibParser = struct {
         self.eat_byte('{') catch {
             BibParser.report_error(
                 "This implementation of a bibtex parser requires all field values to " ++
-                "be wrapped in {{braces}}!\n", .{});
+                    "be wrapped in {{braces}}!\n",
+                .{},
+            );
             return Error.SyntaxError;
         };
 
@@ -286,13 +314,13 @@ pub const BibParser = struct {
         // TODO process into name lists etc.
         // TODO {} protect from case-mangling etc.
         var byte = self.peek_byte();
-        var added_until = self.idx;  // exclusive
+        var added_until = self.idx; // exclusive
         while (true) {
             switch (byte) {
                 '{' => {
                     braces += 1;
                     try field_value_str.appendSlice(self.bytes[added_until..self.idx]);
-                    added_until = self.idx + 1;  // +1 so we don't add the {
+                    added_until = self.idx + 1; // +1 so we don't add the {
                 },
                 '}' => {
                     if (braces == 0) {
@@ -301,7 +329,7 @@ pub const BibParser = struct {
                     } else {
                         braces -= 1;
                         try field_value_str.appendSlice(self.bytes[added_until..self.idx]);
-                        added_until = self.idx + 1;  // +1 so we don't add the }
+                        added_until = self.idx + 1; // +1 so we don't add the }
                     }
                 },
                 '\\' => {
@@ -322,7 +350,7 @@ pub const BibParser = struct {
         if (self.peek_byte() == ',') {
             try self.advance_to_next_byte();
         }
-        
+
         // std.debug.print("Field -> {s}: {s}\n",
         //     .{ self.bytes[field_name_start..field_name_end], field_value_str.items });
 
@@ -334,23 +362,32 @@ pub const BibParser = struct {
                 // NOTE: the split list still uses the memory of field_value_str
                 // so we can't free it
                 value.*.values = try BibParser.split_list(
-                    &self.bib.field_arena.allocator, field_value_str.toOwnedSlice());
+                    &self.bib.field_arena.allocator,
+                    field_value_str.toOwnedSlice(),
+                );
             },
-            .literal_field, .range_field, .integer_field, .datepart_field, .date_field,
-            .verbatim_field, .uri_field, .separated_value_field, .pattern_field,
-            .key_field, .code_field, .special_field, => |*value| {
+            .literal_field,
+            .range_field,
+            .integer_field,
+            .datepart_field,
+            .date_field,
+            .verbatim_field,
+            .uri_field,
+            .separated_value_field,
+            .pattern_field,
+            .key_field,
+            .code_field,
+            .special_field,
+            => |*value| {
                 value.*.value = field_value_str.toOwnedSlice();
             },
         }
 
         // not checking if field already present -> gets overwritten
-        try entry.fields.put(
-            self.bytes[field_name_start..field_name_end],
-            Field{
-                .name = field_name,
-                .data = field_value,
-            }
-        );
+        try entry.fields.put(self.bytes[field_name_start..field_name_end], Field{
+            .name = field_name,
+            .data = field_value,
+        });
     }
 
     inline fn split_list(allocator: *std.mem.Allocator, bytes: []const u8) Error![]const []const u8 {
@@ -370,7 +407,7 @@ pub const BibParser = struct {
 test "split list" {
     const alloc = std.testing.allocator;
     var res = try BibParser.split_list(alloc, "A and B and C and others");
-    var expected = [_][]const u8 { "A", "B", "C", "others" };
+    var expected = [_][]const u8{ "A", "B", "C", "others" };
     for (res) |it, i| {
         try expect(std.mem.eql(u8, it, expected[i]));
     }
@@ -378,7 +415,7 @@ test "split list" {
     alloc.free(res);
 
     res = try BibParser.split_list(alloc, "Hand and von Band, Jr., Test and Stand de Ipsum and others");
-    expected = [_][]const u8 { "Hand", "von Band, Jr., Test", "Stand de Ipsum", "others" };
+    expected = [_][]const u8{ "Hand", "von Band, Jr., Test", "Stand de Ipsum", "others" };
     for (res) |it, i| {
         try expect(std.mem.eql(u8, it, expected[i]));
     }
@@ -414,40 +451,33 @@ test "bibparser" {
     try expect(entry._type == .article);
 
     const author = entry.fields.get("author").?;
-    const author_expected = [_][]const u8 {
-        "Dominik Seidel", "Nils Hoffmann", "Martin Ehbrecht", "Julia Juchheim", "Christian Ammer"
-    };
+    const author_expected = [_][]const u8{ "Dominik Seidel", "Nils Hoffmann", "Martin Ehbrecht", "Julia Juchheim", "Christian Ammer" };
     for (author.data.name_list.values) |it, i| {
         try expect(std.mem.eql(u8, it, author_expected[i]));
     }
 
     var field = entry.fields.get("title").?;
-    try expect(std.mem.eql(
-            u8, field.data.literal_field.value, "How neighborhood affects tree diameter increment"));
+    try expect(
+        std.mem.eql(u8, field.data.literal_field.value, "How neighborhood affects tree diameter increment"),
+    );
 
     field = entry.fields.get("journal").?;
-    try expect(std.mem.eql(
-            u8, field.data.literal_field.value, "Forest Ecology and Management"));
+    try expect(std.mem.eql(u8, field.data.literal_field.value, "Forest Ecology and Management"));
 
     field = entry.fields.get("year").?;
-    try expect(std.mem.eql(
-            u8, field.data.literal_field.value, "2015"));
+    try expect(std.mem.eql(u8, field.data.literal_field.value, "2015"));
 
     field = entry.fields.get("volume").?;
-    try expect(std.mem.eql(
-            u8, field.data.integer_field.value, "336"));
+    try expect(std.mem.eql(u8, field.data.integer_field.value, "336"));
 
     field = entry.fields.get("pages").?;
-    try expect(std.mem.eql(
-            u8, field.data.range_field.value, "119--128"));
+    try expect(std.mem.eql(u8, field.data.range_field.value, "119--128"));
 
     field = entry.fields.get("month").?;
-    try expect(std.mem.eql(
-            u8, field.data.literal_field.value, "jan"));
+    try expect(std.mem.eql(u8, field.data.literal_field.value, "jan"));
 
     field = entry.fields.get("doi").?;
-    try expect(std.mem.eql(
-            u8, field.data.verbatim_field.value, "10.1016/j.foreco.2014.10.020"));
+    try expect(std.mem.eql(u8, field.data.verbatim_field.value, "10.1016/j.foreco.2014.10.020"));
 
     field = entry.fields.get("publisher").?;
     try expect(field.data.literal_list.values.len == 1);
@@ -484,42 +514,42 @@ pub const FieldType = union(enum) {
     // lists
     // all lists can be shortened with 'and others'
     // in case of name_list it will then always print et al. in the bibliography
-    name_list:    ListField,
+    name_list: ListField,
     literal_list: ListField,
-    key_list:     ListField,
+    key_list: ListField,
     // fields
-    literal_field:  SingleField,
-    range_field:    SingleField,
-    integer_field:  SingleField,
+    literal_field: SingleField,
+    range_field: SingleField,
+    integer_field: SingleField,
     datepart_field: SingleField,
-    date_field:     SingleField,
+    date_field: SingleField,
     verbatim_field: SingleField,
-    uri_field:      SingleField,
+    uri_field: SingleField,
     separated_value_field: SingleField,
-    pattern_field:  SingleField,
-    key_field:      SingleField,
-    code_field:     SingleField,
-    special_field:  SingleField,
+    pattern_field: SingleField,
+    key_field: SingleField,
+    code_field: SingleField,
+    special_field: SingleField,
 
     /// returns union with correct tag activated based on it's tag type
     /// NOTE: the payload type will be undefined!
     pub fn from_field_tag(tag: FieldTypeTT) FieldType {
         return switch (tag) {
-            .name_list =>       FieldType{ .name_list = undefined },
-            .literal_list =>    FieldType{ .literal_list = undefined },
-            .key_list =>        FieldType{ .key_list = undefined },
-            .literal_field =>   FieldType{ .literal_field = undefined },
-            .range_field =>     FieldType{ .range_field = undefined },
-            .integer_field =>   FieldType{ .integer_field = undefined },
-            .datepart_field =>  FieldType{ .datepart_field = undefined },
-            .date_field =>      FieldType{ .date_field = undefined },
-            .verbatim_field =>  FieldType{ .verbatim_field = undefined },
-            .uri_field =>       FieldType{ .uri_field = undefined },
+            .name_list => FieldType{ .name_list = undefined },
+            .literal_list => FieldType{ .literal_list = undefined },
+            .key_list => FieldType{ .key_list = undefined },
+            .literal_field => FieldType{ .literal_field = undefined },
+            .range_field => FieldType{ .range_field = undefined },
+            .integer_field => FieldType{ .integer_field = undefined },
+            .datepart_field => FieldType{ .datepart_field = undefined },
+            .date_field => FieldType{ .date_field = undefined },
+            .verbatim_field => FieldType{ .verbatim_field = undefined },
+            .uri_field => FieldType{ .uri_field = undefined },
             .separated_value_field => FieldType{ .separated_value_field = undefined },
-            .pattern_field =>   FieldType{ .pattern_field = undefined },
-            .key_field =>       FieldType{ .key_field = undefined },
-            .code_field =>      FieldType{ .code_field = undefined },
-            .special_field =>   FieldType{ .special_field = undefined },
+            .pattern_field => FieldType{ .pattern_field = undefined },
+            .key_field => FieldType{ .key_field = undefined },
+            .code_field => FieldType{ .code_field = undefined },
+            .special_field => FieldType{ .special_field = undefined },
         };
     }
 };
@@ -533,10 +563,10 @@ pub const ListField = struct {
         suffix: ?[]const u8 = null,
 
         const unkown_format_err = "Name has unkown format{s}!\n" ++
-                                  "Formats are:\n" ++
-                                  "First von Last\n" ++
-                                  "von Last, First\n" ++
-                                  "von Last, Jr, First\n";
+            "Formats are:\n" ++
+            "First von Last\n" ++
+            "von Last, First\n" ++
+            "von Last, Jr, First\n";
     };
 
     const NameState = enum {
@@ -572,7 +602,7 @@ pub const ListField = struct {
             else => return parse_name_with_commas(name, commas),
         }
 
-        return result;
+        unreachable;
     }
 
     fn parse_name_simple(name: []const u8) BibParser.Error!Name {
@@ -587,7 +617,7 @@ pub const ListField = struct {
         var last_end: u16 = 0; // exclusive
         var last_word_start: u16 = 0; // inclusive
         var prev_whitespace = false;
-        while (i < name.len) : ( i += 1 ) {
+        while (i < name.len) : (i += 1) {
             if (utils.is_whitespace(name[i])) {
                 prev_whitespace = true;
                 // to skip initial whitespace
@@ -601,10 +631,10 @@ pub const ListField = struct {
                             .first => {
                                 state = .prefix;
                                 // -1 to not include last space
-                                result.first = name[last_end..i-1];
+                                result.first = name[last_end .. i - 1];
                                 last_end = i;
                             },
-                            else => {}
+                            else => {},
                         }
                     },
                     'A'...'Z' => {
@@ -612,7 +642,7 @@ pub const ListField = struct {
                             .prefix => {
                                 state = .last;
                                 // -1 to not include last space
-                                result.prefix = name[last_end..i-1];
+                                result.prefix = name[last_end .. i - 1];
                                 last_end = i;
                             },
                             else => {},
@@ -629,7 +659,7 @@ pub const ListField = struct {
         // but biblatex seems to interpret First Last correctly
         if (state == .first) {
             if (last_word_start != 0) {
-                result.first = name[0..last_word_start - 1];
+                result.first = name[0 .. last_word_start - 1];
                 result.last = name[last_word_start..];
             } else {
                 result.last = name[0..];
@@ -647,7 +677,7 @@ pub const ListField = struct {
         var last_end: u16 = 0; // exclusive
         var i: u16 = 0;
         var prev_whitespace = false;
-        while (i < name.len) : ( i += 1) {
+        while (i < name.len) : (i += 1) {
             if (utils.is_whitespace(name[i])) {
                 prev_whitespace = true;
                 // to skip initial whitespace
@@ -662,7 +692,7 @@ pub const ListField = struct {
                         if (state == .prefix) {
                             state = .last;
                             if (last_end != i) {
-                                result.prefix = name[last_end..i-1];
+                                result.prefix = name[last_end .. i - 1];
                                 last_end = i;
                             }
                         }
@@ -680,17 +710,17 @@ pub const ListField = struct {
                             // treat everything up to here as last
                             state = if (num_commas < 2) .first else .suffix;
                             result.last = name[last_end..i];
-                            last_end = i + 1;  // skip ,
+                            last_end = i + 1; // skip ,
                         },
                         .suffix => {
                             state = .first;
                             result.suffix = name[last_end..i];
-                            last_end = i + 1;  // skip ,
+                            last_end = i + 1; // skip ,
                         },
                         else => {},
                     }
                 },
-                else => {}
+                else => {},
             }
         }
         result.first = name[last_end..];
@@ -836,12 +866,12 @@ pub const EntryType = enum {
     // ?custom[a-f]
 
     // aliases
-    conference,  // -> inproceedings
-    electronic,  // -> online
-    mastersthesis,  // special case of thesis, as type tag
-    phdthesis,  // special case of thesis, as type tag
-    techreport,  // -> report, as type tag
-    www,  // -> online
+    conference, // -> inproceedings
+    electronic, // -> online
+    mastersthesis, // special case of thesis, as type tag
+    phdthesis, // special case of thesis, as type tag
+    techreport, // -> report, as type tag
+    www, // -> online
 
     // non-standard types -> treated as misc
     artwork,
@@ -871,7 +901,7 @@ pub const FieldName = enum {
     // NOTE: IMPORTANT don't change the order of these since it requires to also change
     // the switch in get_field_type below
     // literal_field START
-    custom,  // arbitrary name to e.g. save additional info
+    custom, // arbitrary name to e.g. save additional info
     abstract,
     addendum,
     annotation,
@@ -879,7 +909,7 @@ pub const FieldName = enum {
     booktitle,
     booktitleaddon,
     chapter,
-    edition,  // can be integer or literal
+    edition, // can be integer or literal
     eid,
     entrysubtype,
     eprintclass,
@@ -935,11 +965,11 @@ pub const FieldName = enum {
     verba,
     verbb,
     verbc,
-    annote,   // alias for annotation
-    archiveprefix,  // alias -> eprinttype
-    journal,   // alias -> journaltitle
-    key,  // aliast -> sortkey
-    primaryclass,  // alias -> eprintclass
+    annote, // alias for annotation
+    archiveprefix, // alias -> eprinttype
+    journal, // alias -> journaltitle
+    key, // aliast -> sortkey
+    primaryclass, // alias -> eprintclass
     // literal_field END
     //
     // name_list START
@@ -988,7 +1018,7 @@ pub const FieldName = enum {
     doi,
     eprint,
     file,
-    pdf,   // alias -> file
+    pdf, // alias -> file
     // verbatim_field END
     //
     // literal_list START
@@ -1005,8 +1035,8 @@ pub const FieldName = enum {
     listd,
     liste,
     listf,
-    address,  // alias for location
-    school,   // alias -> institution
+    address, // alias for location
+    school, // alias -> institution
     // literal_list END
     //
     // key_list START
@@ -1055,17 +1085,17 @@ pub const FieldName = enum {
     pub fn get_field_type(self: FieldName) FieldTypeTT {
         // ... is not allowed with enums, so cast it to it's underlying int tag type
         return switch (@enumToInt(self)) {
-            @enumToInt(FieldName.custom) ... @enumToInt(FieldName.primaryclass) => .literal_field,
-            @enumToInt(FieldName.afterword) ... @enumToInt(FieldName.namec) => .name_list,
-            @enumToInt(FieldName.authortype) ... @enumToInt(FieldName.namectype) => .key_field,
-            @enumToInt(FieldName.date) ... @enumToInt(FieldName.urldate) => .date_field, 
-            @enumToInt(FieldName.doi) ... @enumToInt(FieldName.pdf) => .verbatim_field,
-            @enumToInt(FieldName.institution) ... @enumToInt(FieldName.school) => .literal_list,
+            @enumToInt(FieldName.custom)...@enumToInt(FieldName.primaryclass) => .literal_field,
+            @enumToInt(FieldName.afterword)...@enumToInt(FieldName.namec) => .name_list,
+            @enumToInt(FieldName.authortype)...@enumToInt(FieldName.namectype) => .key_field,
+            @enumToInt(FieldName.date)...@enumToInt(FieldName.urldate) => .date_field,
+            @enumToInt(FieldName.doi)...@enumToInt(FieldName.pdf) => .verbatim_field,
+            @enumToInt(FieldName.institution)...@enumToInt(FieldName.school) => .literal_list,
             @enumToInt(FieldName.language), @enumToInt(FieldName.origlanguage) => .key_list,
             @enumToInt(FieldName.pages) => .range_field,
             @enumToInt(FieldName.url) => .uri_field,
             @enumToInt(FieldName.volume), @enumToInt(FieldName.volumes) => .integer_field,
-            @enumToInt(FieldName.ids) ... @enumToInt(FieldName.xref) => .special_field,
+            @enumToInt(FieldName.ids)...@enumToInt(FieldName.xref) => .special_field,
             else => unreachable,
         };
     }

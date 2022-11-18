@@ -94,7 +94,7 @@ pub fn nodes_from_citeproc_json(
 fn nodes_from_formatted(
     allocator: *std.mem.Allocator,
     formatted_items: []const std.json.Value,
-    first_parent: *Node
+    first_parent: *Node,
 ) !void {
 
     // TODO instead of chaning the BuiltinCall node to Citation
@@ -195,12 +195,12 @@ pub fn run_citeproc(
     // see: https://github.com/ziglang/zig/pull/2705 and https://github.com/ziglang/zig/pull/2770
     const cmd = &[_][]const u8{
         "citeproc", "--format=json",
-        "--style", csl_file,
+        "--style",  csl_file,
     };
 
     log.debug("Cite commands:", .{});
     for (cmd) |c| {
-        log.debug("{s} ", .{ c });
+        log.debug("{s} ", .{c});
     }
 
     var runner = try std.ChildProcess.init(cmd, allocator);
@@ -256,7 +256,7 @@ pub fn run_citeproc(
                     .number => |num| {
                         // engough chars for a 64-bit number
                         var buf: [20]u8 = undefined;
-                        const str = try std.fmt.bufPrint(buf[0..], "{}", .{ num });
+                        const str = try std.fmt.bufPrint(buf[0..], "{}", .{num});
                         // BufSet copies the str so this is fine
                         try ids.insert(str);
                     },
@@ -276,7 +276,7 @@ pub fn run_citeproc(
             .number => |num| {
                 // engough chars for a 64-bit number
                 var buf: [20]u8 = undefined;
-                const str = try std.fmt.bufPrint(buf[0..], "{}", .{ num });
+                const str = try std.fmt.bufPrint(buf[0..], "{}", .{num});
                 // BufSet copies the str so this is fine
                 if (ids.contains(str))
                     try used_refs.append(ref);
@@ -320,7 +320,7 @@ pub fn run_citeproc(
 pub fn csl_items_from_file(
     allocator: *std.mem.Allocator,
     filename: []const u8,
-    write_conversion: bool
+    write_conversion: bool,
 ) !csl.CSLJsonParser.Result {
     var ref_file_type = enum { bib, json, unsupported }.unsupported;
     if (std.mem.endsWith(u8, filename, ".bib")) {
@@ -360,16 +360,20 @@ pub fn csl_items_from_file(
                 // swap .bib with .json extension
                 var converted_fn = try allocator.alloc(u8, filename.len + 1);
                 @memcpy(converted_fn.ptr, filename.ptr, filename.len);
-                @memcpy(converted_fn[filename.len - 3..].ptr, "json", 4);
+                @memcpy(converted_fn[filename.len - 3 ..].ptr, "json", 4);
 
                 const write_file = blk: {
                     if (std.fs.path.isAbsolute(converted_fn)) {
                         // truncate: reduce file to length 0 if it exists
                         break :blk try std.fs.createFileAbsolute(
-                                   converted_fn, .{ .read = true, .truncate = true });
+                            converted_fn,
+                            .{ .read = true, .truncate = true },
+                        );
                     } else {
                         break :blk try std.fs.cwd().createFile(
-                                   converted_fn, .{ .read = true, .truncate = true });
+                            converted_fn,
+                            .{ .read = true, .truncate = true },
+                        );
                     }
                 };
                 defer write_file.close();

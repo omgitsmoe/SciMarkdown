@@ -4,12 +4,9 @@ const expect = std.testing.expect;
 // zig gets polymorphism/generics by using compile time functions that return a type
 /// DFS Iterator that visits/emits Nodes twice, once on start and when closing/ending
 /// skip_start_wo_children: skips is_end=false NodeInfo for items without children
-pub fn DepthFirstIterator(
-    comptime T: type,
-    comptime skip_start_wo_children: bool
-) type {
+pub fn DepthFirstIterator(comptime T: type, comptime skip_start_wo_children: bool) type {
     return struct {
-        const Self = @This();  // polymorphic type
+        const Self = @This(); // polymorphic type
         // need struct to be able to signal nodes starting/ending for
         // postorder traversal
         pub const NodeInfo = struct {
@@ -29,8 +26,8 @@ pub fn DepthFirstIterator(
             // see test3.zig
             // initializing it outside the struct succeeds
             var next_item = NodeInfo{
-                    .data = start,
-                    .is_end = false,
+                .data = start,
+                .is_end = false,
             };
             var dfs = Self{
                 .start = start,
@@ -55,7 +52,7 @@ pub fn DepthFirstIterator(
                     if (skip_start_wo_children) {
                         self.next_item = NodeInfo{
                             .data = child,
-                            .is_end = if (child.first_child == null) true else false
+                            .is_end = if (child.first_child == null) true else false,
                         };
                     } else {
                         self.next_item = NodeInfo{ .data = child, .is_end = false };
@@ -108,7 +105,12 @@ pub fn DepthFirstIterator(
 
 /// intialize a union with a PayloadType that is known at comptime, but the tag and value only
 /// being known at runtime
-pub fn unionInitTagged(comptime U: type, tag: std.meta.Tag(U), comptime PayloadType: type, val: anytype) U {
+pub fn unionInitTagged(
+    comptime U: type,
+    tag: std.meta.Tag(U),
+    comptime PayloadType: type,
+    val: anytype,
+) U {
     const uT = @typeInfo(U).Union;
     inline for (uT.fields) |union_field, enum_i| {
         // field types don't match -> otherwise @unionInit compile error
@@ -178,27 +180,27 @@ pub fn uintDigits(x: anytype) u8 {
     comptime std.debug.assert(tT.Int.signedness == .unsigned);
     comptime if (tT.Int.bits > 64) @compileError("Only integers up to 64bits are implemented!");
 
-    if (x < 10)                     return 1;
-    if (x < 100)                    return 2;
-    if (x < 1000)                   return 3;
-    if (x < 10000)                  return 4;
-    if (x < 100000)                 return 5;
-    if (x < 1000000)                return 6;
-    if (x < 10000000)               return 7;
-    if (x < 100000000)              return 8;
-    if (x < 1000000000)             return 9;
-    if (x < 10000000000)            return 10;  // 32bit
-    if (x < 100000000000)           return 11;
-    if (x < 1000000000000)          return 12;
-    if (x < 10000000000000)         return 13;
-    if (x < 100000000000000)        return 14;
-    if (x < 1000000000000000)       return 15;
-    if (x < 10000000000000000)      return 16;
-    if (x < 100000000000000000)     return 17;
-    if (x < 1000000000000000000)    return 18;
-    if (x < 10000000000000000000)   return 19;
+    if (x < 10) return 1;
+    if (x < 100) return 2;
+    if (x < 1000) return 3;
+    if (x < 10000) return 4;
+    if (x < 100000) return 5;
+    if (x < 1000000) return 6;
+    if (x < 10000000) return 7;
+    if (x < 100000000) return 8;
+    if (x < 1000000000) return 9;
+    if (x < 10000000000) return 10; // 32bit
+    if (x < 100000000000) return 11;
+    if (x < 1000000000000) return 12;
+    if (x < 10000000000000) return 13;
+    if (x < 100000000000000) return 14;
+    if (x < 1000000000000000) return 15;
+    if (x < 10000000000000000) return 16;
+    if (x < 100000000000000000) return 17;
+    if (x < 1000000000000000000) return 18;
+    if (x < 10000000000000000000) return 19;
 
-    return 20;  // 64bit
+    return 20; // 64bit
 }
 
 test "uintDigits" {
@@ -236,7 +238,8 @@ test "intDigits" {
 /// all of the string is_.. functions are ascii only!!
 pub inline fn is_alpha(char: u8) bool {
     if ((char >= 'A' and char <= 'Z') or
-        (char >= 'a' and char <= 'z')) {
+        (char >= 'a' and char <= 'z'))
+    {
         return true;
     } else {
         return false;

@@ -133,8 +133,10 @@ pub fn main() !void {
         // unfortunately not possible to switch on error sets yet:
         // https://github.com/ziglang/zig/issues/2473
         code_runner.run() catch |err| {
-            log.err("Running {s} code chunks with executable '{s}' failed with error: {s}\n",
-                    .{ @tagName(lang), "TODO", @errorName(err) });
+            log.err(
+                "Running {s} code chunks with executable '{s}' failed with error: {s}\n",
+                .{ @tagName(lang), "TODO", @errorName(err) },
+            );
         };
     }
     defer {
@@ -150,12 +152,16 @@ pub fn main() !void {
             defer csl_json_result.arena.deinit();
 
             const bib_entries = run_citeproc(
-                &parser.node_arena.allocator, parser.citations.items, csl_json_result.items,
-                csl_file.?, csl_locale.?) catch |err| blk: {
-                    log.err("Running citeproc failed with error: {s}\n", .{ @errorName(err) });
-                    log.err("Citation processing was aborted!", .{});
+                &parser.node_arena.allocator,
+                parser.citations.items,
+                csl_json_result.items,
+                csl_file.?,
+                csl_locale.?,
+            ) catch |err| blk: {
+                log.err("Running citeproc failed with error: {s}\n", .{@errorName(err)});
+                log.err("Citation processing was aborted!", .{});
 
-                    break :blk &[_]*ast.Node{};
+                break :blk &[_]*ast.Node{};
             };
             if (parser.bibliography) |bib| {
                 for (bib_entries) |entry| {
@@ -163,8 +169,7 @@ pub fn main() !void {
                 }
             }
         } else {
-            log.warn(
-                "Both a references file (BibLaTeX or CSL-JSON) as well as CSL file " ++
+            log.warn("Both a references file (BibLaTeX or CSL-JSON) as well as CSL file " ++
                 "and a locale is needed to process citations!", .{});
         }
     }

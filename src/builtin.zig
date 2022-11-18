@@ -18,19 +18,19 @@ pub const BuiltinCall = enum {
 pub const BuiltinCallInfo = struct {
     // 0 -> varargs
     pos_params: i16,
-    kw_params:  u16,
+    kw_params: u16,
     // whether BuiltinResult should be allocated and stored persistently
     persistent: bool,
 };
 
-pub const builtin_call_info = [_]BuiltinCallInfo {
-    .{ .pos_params =  1, .kw_params = 4, .persistent = true },  // cite
-    .{ .pos_params =  1, .kw_params = 4, .persistent = true },  // textcite
-    .{ .pos_params = -1, .kw_params = 0, .persistent = true },  // cites
-    .{ .pos_params =  0, .kw_params = 0, .persistent = false },  // bibliography
-    .{ .pos_params =  1, .kw_params = 0, .persistent = false },  // sc
-    .{ .pos_params =  1, .kw_params = 0, .persistent = true },  // label
-    .{ .pos_params =  1, .kw_params = 0, .persistent = true },  // ref
+pub const builtin_call_info = [_]BuiltinCallInfo{
+    .{ .pos_params = 1, .kw_params = 4, .persistent = true }, // cite
+    .{ .pos_params = 1, .kw_params = 4, .persistent = true }, // textcite
+    .{ .pos_params = -1, .kw_params = 0, .persistent = true }, // cites
+    .{ .pos_params = 0, .kw_params = 0, .persistent = false }, // bibliography
+    .{ .pos_params = 1, .kw_params = 0, .persistent = false }, // sc
+    .{ .pos_params = 1, .kw_params = 0, .persistent = true }, // label
+    .{ .pos_params = 1, .kw_params = 0, .persistent = true }, // ref
 };
 
 // TODO @CleanUp should this be a sep tag and union, since the result is optional we never
@@ -47,10 +47,10 @@ pub const BuiltinResult = union(BuiltinCall) {
     bibliography: *ast.Node,
     sc,
     label: []const u8,
-    ref:   []const u8,
+    ref: []const u8,
 };
 
-pub const Error = error {
+pub const Error = error{
     OutOfMemory,
     SyntaxError,
     ArgumentMismatch,
@@ -64,10 +64,10 @@ pub const Error = error {
 /// evaluate_builtin and derivatives are expected to clean up the argument nodes
 /// so that only the builtin_node itself OR the result nodes remain!
 pub fn evaluate_builtin(
-    allocator: *std.mem.Allocator, 
+    allocator: *std.mem.Allocator,
     builtin_node: *ast.Node,
     builtin_type: BuiltinCall,
-    data: anytype
+    data: anytype,
 ) Error!BuiltinResult {
     var result: BuiltinResult = undefined;
     // NOTE: theoretically builtins using results of other arbitrary builtins are allowed
@@ -116,19 +116,15 @@ pub fn evaluate_builtin(
                                 try citations.append(tc_result.textcite[1]);
                             },
                             else => {
-                                log.err(
-                                    "Only calls to @cite or @textcite are allowed as arguments " ++
-                                    "to builtin call '{s}'!\n",
-                                    .{ @tagName(builtin_type) });
+                                log.err("Only calls to @cite or @textcite are allowed as arguments " ++
+                                    "to builtin call '{s}'!\n", .{@tagName(builtin_type)});
                                 return Error.ArgumentMismatch;
                             },
                         }
                     },
                     else => {
-                        log.err(
-                            "Only calls to @cite or @textcite are allowed as arguments " ++
-                            "to builtin call '{s}'!\n",
-                            .{ @tagName(builtin_type) });
+                        log.err("Only calls to @cite or @textcite are allowed as arguments " ++
+                            "to builtin call '{s}'!\n", .{@tagName(builtin_type)});
                         return Error.ArgumentMismatch;
                     },
                 }
@@ -136,7 +132,7 @@ pub fn evaluate_builtin(
 
             log.debug("Multicite:\n", .{});
             for (citations.items) |it| {
-                log.debug("    {s}\n", .{ it });
+                log.debug("    {s}\n", .{it});
             }
             log.debug("Multicite END\n", .{});
 
@@ -158,7 +154,7 @@ pub fn evaluate_builtin(
         .sc => {
             var only_arg = builtin_node.first_child.?;
             var text_node = only_arg.first_child.?;
-            text_node.detach();  // remove from only_arg
+            text_node.detach(); // remove from only_arg
             // TODO validate arg types in a pre-pass?
 
             // insert parent .SmallCaps node above text_node
@@ -202,10 +198,9 @@ pub fn evaluate_builtin(
 pub fn evaluate_builtin_textcite(
     builtin_node: *ast.Node,
     builtin_type: BuiltinCall,
-    data: anytype
+    data: anytype,
 ) Error![2]csl.CitationItem {
     _ = builtin_type;
-    _ = data;
     // TODO fix kwargs on textcite since we use two separate cites to emulate a real textcite
     // the pre/post/etc get printed twice
     var cite_author_only = try evaluate_builtin_cite(builtin_node, .textcite, data);
@@ -214,13 +209,13 @@ pub fn evaluate_builtin_textcite(
     cite_author_only.@"author-only" = .{ .boolean = true };
     cite_no_author.@"suppress-author" = .{ .boolean = true };
 
-    return [2]csl.CitationItem { cite_author_only, cite_no_author };
+    return [2]csl.CitationItem{ cite_author_only, cite_no_author };
 }
 
 pub fn evaluate_builtin_cite(
     builtin_node: *ast.Node,
     builtin_type: BuiltinCall,
-    data: anytype
+    data: anytype,
 ) Error!csl.CitationItem {
     _ = data;
     // return BuiltinResult here as well?
@@ -240,7 +235,8 @@ pub fn evaluate_builtin_cite(
         if (fchild.data != .PostionalArg) {
             log.err(
                 "Builtin call '{s}' missing first postional argument 'id'!\n",
-                .{ @tagName(builtin_type) });
+                .{@tagName(builtin_type)},
+            );
             return Error.ArgumentMismatch;
         }
         var id = fchild.first_child.?.data.Text.text;
@@ -250,15 +246,16 @@ pub fn evaluate_builtin_cite(
             id = id[1..];
         }
         citation.id.string = id;
-        log.debug("First pos arg: {s}\n", .{ fchild.first_child.?.data.Text.text });
+        log.debug("First pos arg: {s}\n", .{fchild.first_child.?.data.Text.text});
 
         var mb_next = fchild.next;
         while (mb_next) |next| : (mb_next = next.next) {
             if (next.first_child == null or next.first_child.?.data != .Text) {
                 log.err(
                     "Only textual arguments allowed for builtin call '{s}'!\n",
-                    .{ @tagName(builtin_type) });
-                log.debug("Other data: {}\n", .{ next.data });
+                    .{@tagName(builtin_type)},
+                );
+                log.debug("Other data: {}\n", .{next.data});
                 return Error.ArgumentMismatch;
             }
 
@@ -271,7 +268,7 @@ pub fn evaluate_builtin_cite(
                             // TODO: @Improvement include starting token in ast.Node
                             // so we can inlcude line_nr when error reporting?
                             log.err("Nested calls to cite " ++
-                                    "builtins are not allowed!", .{});
+                                "builtins are not allowed!", .{});
                             return Error.BuiltinNotAllowed;
                         },
                         else => {},
@@ -287,29 +284,32 @@ pub fn evaluate_builtin_cite(
                 citation.locator = next.first_child.?.data.Text.text;
             } else if (std.mem.eql(u8, next.data.KeywordArg.keyword, "label")) {
                 const mb_loc_type = std.meta.stringToEnum(
-                    csl.CitationItem.LocatorType, next.first_child.?.data.Text.text);
+                    csl.CitationItem.LocatorType,
+                    next.first_child.?.data.Text.text,
+                );
                 if (mb_loc_type) |loc_type| {
                     citation.label = loc_type;
                 } else {
                     log.err(
                         "'label={s}' is not a valid locator type! See " ++
-                        "https://docs.citationstyles.org/en/stable/" ++
-                        "specification.html#locators for valid locator types!\n",
-                        .{ next.first_child.?.data.Text.text });
+                            "https://docs.citationstyles.org/en/stable/" ++
+                            "specification.html#locators for valid locator types!\n",
+                        .{next.first_child.?.data.Text.text},
+                    );
                     return Error.InvalidArgument;
                 }
             } else {
                 log.err(
                     "Unexpected keyword argument '{s}' for builtin call '{s}'!\n",
-                    .{ next.data.KeywordArg.keyword, @tagName(builtin_type) });
+                    .{ next.data.KeywordArg.keyword, @tagName(builtin_type) },
+                );
                 return Error.ArgumentMismatch;
             }
         }
 
-        log.debug("After collecting kwargs:\n{}\n", .{ citation });
+        log.debug("After collecting kwargs:\n{}\n", .{citation});
     } else {
-        log.err(
-            "Builtin call has no arguments!\n", .{});
+        log.err("Builtin call has no arguments!\n", .{});
         return Error.ArgumentMismatch;
     }
 

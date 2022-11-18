@@ -6,7 +6,7 @@ const log = std.log;
 
 pub const Item = struct {
     // required: type, id; no additional properties
-    @"type": ItemType,  // string -> enum
+    @"type": ItemType, // string -> enum
     id: OrdinaryVar,
     optionals: PropertyMap,
 
@@ -249,7 +249,6 @@ pub const NameVar = struct {
     @"static-ordering": ?BoolLike = null,
     literal: ?[]const u8 = null,
     @"parse-names": ?BoolLike = null,
-
 };
 
 pub const DateVar = union(enum) {
@@ -289,7 +288,7 @@ pub const DateVar = union(enum) {
 };
 
 pub const Citation = struct {
-    // schema: "https://resource.citationstyles.org/schema/latest/input/json/csl-citation.json" 
+    // schema: "https://resource.citationstyles.org/schema/latest/input/json/csl-citation.json"
     schema: []const u8,
     citationID: OrdinaryVar,
     citationItems: ?[]CitationItem = null,
@@ -307,7 +306,7 @@ pub const CitationItem = struct {
     @"suppress-author": ?BoolLike = null,
     @"author-only": ?BoolLike = null,
     uris: ?[]const []const u8 = null,
-    
+
     pub const LocatorType = enum {
         act,
         appendix,
@@ -469,7 +468,7 @@ pub const CSLJsonParser = struct {
         end,
     };
 
-    pub const Error = error {
+    pub const Error = error{
         UnexpectedToken,
         ParserFinished,
         ParserNotFinished,
@@ -560,7 +559,9 @@ pub const CSLJsonParser = struct {
                 switch (token) {
                     .String => |str| {
                         const slice = str.slice(self.input, self.stream.i - 1);
-                        self.items.items[self.current].id = .{ .string = try self.copy_string(str, slice) };
+                        self.items.items[self.current].id = .{
+                            .string = try self.copy_string(str, slice),
+                        };
                     },
                     .Number => |num| {
                         if (!num.is_integer) {
@@ -583,7 +584,7 @@ pub const CSLJsonParser = struct {
                         if (mb_item_type) |item_type| {
                             self.items.items[self.current].@"type" = item_type;
                         } else {
-                            log.err("Unknown CSL-JSON item type: {s}\n", .{ slice });
+                            log.err("Unknown CSL-JSON item type: {s}\n", .{slice});
                             return Error.UnknownItemType;
                         }
                         self.state = .after_field_value;
@@ -599,12 +600,10 @@ pub const CSLJsonParser = struct {
     fn copy_string(
         self: *@This(),
         str: std.meta.TagPayload(std.json.Token, .String),
-        slice: []const u8
+        slice: []const u8,
     ) ![]const u8 {
-
         if (str.escapes == .Some) {
-            var strbuf = try std.ArrayList(u8).initCapacity(
-                    &self.arena.allocator, str.decodedLength());
+            var strbuf = try std.ArrayList(u8).initCapacity(&self.arena.allocator, str.decodedLength());
 
             var escaped = false;
             for (slice) |b| {
@@ -632,7 +631,9 @@ pub const CSLJsonParser = struct {
         // since json.parse will just parse the first matching union type
         // so e.g. citation-key and language will always end up as citation-key
         const prop_kind = std.meta.stringToEnum(
-            std.meta.Tag(Property), prop_name) orelse return Error.UnknownProperty;
+            std.meta.Tag(Property),
+            prop_name,
+        ) orelse return Error.UnknownProperty;
 
         // @Compiler / @stdlib meta.TagPayload and @unionInit only work with comptime
         // known values, would be really practical if there were runtime variants
@@ -657,28 +658,66 @@ pub const CSLJsonParser = struct {
         // switch on tag so we know which payload type we have to parse then set prop using
         // json.parse's result
         switch (prop_kind) {
-            .@"citation-key", .language, .journalAbbreviation, .shortTitle,
-            .abstract, .annote, .archive, .archive_collection, .archive_location,
-            .@"archive-place", .authority, .@"call-number",
-            .@"citation-label", .@"collection-title", .@"container-title",
-            .@"container-title-short", .dimensions, .division, .DOI,
+            .@"citation-key",
+            .language,
+            .journalAbbreviation,
+            .shortTitle,
+            .abstract,
+            .annote,
+            .archive,
+            .archive_collection,
+            .archive_location,
+            .@"archive-place",
+            .authority,
+            .@"call-number",
+            .@"citation-label",
+            .@"collection-title",
+            .@"container-title",
+            .@"container-title-short",
+            .dimensions,
+            .division,
+            .DOI,
             // Deprecated - use '@"event-title' instead. Will be removed in 1.1
             // event: []const u8,
-            .@"event-title", .@"event-place", .genre, .ISBN, .ISSN, .jurisdiction,
-            .keyword, .medium, .note, .@"original-publisher", .@"original-publisher-place",
-            .@"original-title", .@"part-title", .PMCID, .PMID, .publisher, .@"publisher-place",
-            .references, .@"reviewed-genre", .@"reviewed-title", .scale, .section, .source,
-            .status, .title, .@"title-short", .URL, .version, .@"volume-title",
-            .@"volume-title-short", .@"year-suffix",
+            .@"event-title",
+            .@"event-place",
+            .genre,
+            .ISBN,
+            .ISSN,
+            .jurisdiction,
+            .keyword,
+            .medium,
+            .note,
+            .@"original-publisher",
+            .@"original-publisher-place",
+            .@"original-title",
+            .@"part-title",
+            .PMCID,
+            .PMID,
+            .publisher,
+            .@"publisher-place",
+            .references,
+            .@"reviewed-genre",
+            .@"reviewed-title",
+            .scale,
+            .section,
+            .source,
+            .status,
+            .title,
+            .@"title-short",
+            .URL,
+            .version,
+            .@"volume-title",
+            .@"volume-title-short",
+            .@"year-suffix",
             => {
                 // []const u8,
                 const payload = std.json.parse(
-                    []const u8, &self.stream,
-                    .{ .allocator = &self.arena.allocator,
-                       .allow_trailing_data = true }
+                    []const u8,
+                    &self.stream,
+                    .{ .allocator = &self.arena.allocator, .allow_trailing_data = true },
                 ) catch |err| {
-                    log.err("Could not parse property for field: {s} due to err {s}\n",
-                            .{ prop_name, err });
+                    log.err("Could not parse property for field: {s} due to err {s}\n", .{ prop_name, err });
                     return Error.UnknownProperty;
                 };
                 prop = utils.unionInitTagged(Property, prop_kind, []const u8, payload);
@@ -687,67 +726,92 @@ pub const CSLJsonParser = struct {
             .categories => {
                 // []const []const u8,
                 const payload = std.json.parse(
-                    []const []const u8, &self.stream,
-                    .{ .allocator = &self.arena.allocator,
-                       .allow_trailing_data = true }
+                    []const []const u8,
+                    &self.stream,
+                    .{ .allocator = &self.arena.allocator, .allow_trailing_data = true },
                 ) catch |err| {
-                    log.err("Could not parse property for field: {s} due to err {s}\n",
-                            .{ prop_name, err });
+                    log.err("Could not parse property for field: {s} due to err {s}\n", .{ prop_name, err });
                     return Error.UnknownProperty;
                 };
                 prop = utils.unionInitTagged(Property, prop_kind, []const []const u8, payload);
             },
 
-            .author, .chair, .@"collection-editor", .compiler, .composer,
-            .@"container-author", .contributor, .curator, .director,
-            .editor, .@"editorial-director", .@"executive-producer", .guest,
-            .host, .interviewer, .illustrator, .narrator, .organizer,
-            .@"original-author", .performer, .producer, .recipient,
-            .@"reviewed-author", .@"script-writer", .@"series-creator", .translator
+            .author,
+            .chair,
+            .@"collection-editor",
+            .compiler,
+            .composer,
+            .@"container-author",
+            .contributor,
+            .curator,
+            .director,
+            .editor,
+            .@"editorial-director",
+            .@"executive-producer",
+            .guest,
+            .host,
+            .interviewer,
+            .illustrator,
+            .narrator,
+            .organizer,
+            .@"original-author",
+            .performer,
+            .producer,
+            .recipient,
+            .@"reviewed-author",
+            .@"script-writer",
+            .@"series-creator",
+            .translator,
             => {
                 // []NameVar
                 const payload = std.json.parse(
-                    []NameVar, &self.stream,
-                    .{ .allocator = &self.arena.allocator,
-                       .allow_trailing_data = true }
+                    []NameVar,
+                    &self.stream,
+                    .{ .allocator = &self.arena.allocator, .allow_trailing_data = true },
                 ) catch |err| {
-                    log.err("Could not parse property for field: {s} due to err {s}\n",
-                            .{ prop_name, err });
+                    log.err("Could not parse property for field: {s} due to err {s}\n", .{ prop_name, err });
                     return Error.UnknownProperty;
                 };
                 prop = utils.unionInitTagged(Property, prop_kind, []NameVar, payload);
             },
 
-            .accessed, .@"available-date", .@"event-date", .issued,
-            .@"original-date", .submitted
-            => {
+            .accessed, .@"available-date", .@"event-date", .issued, .@"original-date", .submitted => {
                 // DateVar
                 const payload = std.json.parse(
-                    DateVar, &self.stream,
-                    .{ .allocator = &self.arena.allocator,
-                       .allow_trailing_data = true }
+                    DateVar,
+                    &self.stream,
+                    .{ .allocator = &self.arena.allocator, .allow_trailing_data = true },
                 ) catch |err| {
-                    log.err("Could not parse property for field: {s} due to err {s}\n",
-                            .{ prop_name, err });
+                    log.err("Could not parse property for field: {s} due to err {s}\n", .{ prop_name, err });
                     return Error.UnknownProperty;
                 };
                 prop = utils.unionInitTagged(Property, prop_kind, DateVar, payload);
             },
 
-
-            .@"chapter-number", .@"citation-number", .@"collection-number", .edition,
-            .@"first-reference-note-number", .issue, .locator, .number,
-            .@"number-of-pages", .@"number-of-volumes", .page, .@"page-first",
-            .part, .printing, .supplement, .volume,
+            .@"chapter-number",
+            .@"citation-number",
+            .@"collection-number",
+            .edition,
+            .@"first-reference-note-number",
+            .issue,
+            .locator,
+            .number,
+            .@"number-of-pages",
+            .@"number-of-volumes",
+            .page,
+            .@"page-first",
+            .part,
+            .printing,
+            .supplement,
+            .volume,
             => {
                 // OrdinaryVar
                 const payload = std.json.parse(
-                    OrdinaryVar, &self.stream,
-                    .{ .allocator = &self.arena.allocator,
-                       .allow_trailing_data = true }
+                    OrdinaryVar,
+                    &self.stream,
+                    .{ .allocator = &self.arena.allocator, .allow_trailing_data = true },
                 ) catch |err| {
-                    log.err("Could not parse property for field: {s} due to err {s}\n",
-                            .{ prop_name, err });
+                    log.err("Could not parse property for field: {s} due to err {s}\n", .{ prop_name, err });
                     return Error.UnknownProperty;
                 };
                 prop = utils.unionInitTagged(Property, prop_kind, OrdinaryVar, payload);

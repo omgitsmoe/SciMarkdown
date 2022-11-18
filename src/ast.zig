@@ -25,21 +25,30 @@ pub const Node = struct {
     // separate kind field
     data: NodeData,
 
-    pub const LinkData = struct { label: ?[]const u8, url: ?[]const u8, title: ?[]const u8};
+    pub const LinkData = struct { label: ?[]const u8, url: ?[]const u8, title: ?[]const u8 };
     pub const EmphData = struct { opener_token_kind: TokenKind };
     pub const ListData = struct { blank_lines: u32, start_num: u16 = 1, ol_type: u8 };
-    pub const CodeData = struct { language: Language, code: []const u8, run: bool,
-                                  stdout: ?[]const u8 = null, stderr: ?[]const u8 = null };
+    pub const CodeData = struct {
+        language: Language,
+        code: []const u8,
+        run: bool,
+        stdout: ?[]const u8 = null,
+        stderr: ?[]const u8 = null,
+    };
     /// indent: column that list item startes need to have in order to continue the list
     ///         1. test
     ///           - sublist
     ///           ^ this is the indent of the sublist
     // we also need to store the list item starter offset (due to ordered list item
     // starters being variable) and so users can align the text abritrarily
-    pub const ListItemData = struct { list_item_starter: TokenKind, indent: u16,
-                                      //           offset in bytes from immediate list item starter
-                                      //           to first non-whitespace byte
-                                      ol_type: u8, li_starter_offset: u8 };
+    pub const ListItemData = struct {
+        list_item_starter: TokenKind,
+        indent: u16,
+        //           offset in bytes from immediate list item starter
+        //           to first non-whitespace byte
+        ol_type: u8,
+        li_starter_offset: u8,
+    };
     pub const CitationData = struct { id: []const u8 };
 
     // tagged union
@@ -49,7 +58,10 @@ pub const Node = struct {
         Document,
         Import,
 
-        BuiltinCall: struct { builtin_type: builtin.BuiltinCall, result: ?*builtin.BuiltinResult = null },
+        BuiltinCall: struct {
+            builtin_type: builtin.BuiltinCall,
+            result: ?*builtin.BuiltinResult = null,
+        },
         PostionalArg,
         KeywordArg: struct { keyword: []const u8 },
 
@@ -85,7 +97,7 @@ pub const Node = struct {
 
         OrderedList: ListData,
         OrderedListItem: ListItemData,
-        
+
         // ?
         Table,
         TableRow,
@@ -112,23 +124,27 @@ pub const Node = struct {
             inline for (uT.fields) |union_field, enum_i| {
                 // check for active tag
                 if (enum_i == @enumToInt(self.*)) {
-                    std.debug.print("{s}{{ ", .{ @tagName(self.*) });
+                    std.debug.print("{s}{{ ", .{@tagName(self.*)});
                     // the union_field is only the active union variant like BuiltinCall or CodeSpan etc.
                     // iter over actual payload type fields (assuming it's a struct)
                     switch (@typeInfo(union_field.field_type)) {
                         .Struct => |fT| {
                             inline for (fT.fields) |ft_field| {
-                                std.debug.print(".{s} = ", .{ ft_field.name });
+                                std.debug.print(".{s} = ", .{ft_field.name});
                                 // print as str if type is []const u8
                                 // necessary due to zig's recent change to just print []u8 as actual u8
                                 // unless explicitly specified as {s}, which means every []u8 has
                                 // to specified manually with {s} which is a pain in nested structs etc.
                                 if (ft_field.field_type == []const u8) {
-                                    std.debug.print("'{s}', ",
-                                        .{ @field(@field(self, union_field.name), ft_field.name) });
+                                    std.debug.print(
+                                        "'{s}', ",
+                                        .{@field(@field(self, union_field.name), ft_field.name)},
+                                    );
                                 } else {
-                                    std.debug.print("{any}, ",
-                                        .{ @field(@field(self, union_field.name), ft_field.name) });
+                                    std.debug.print(
+                                        "{any}, ",
+                                        .{@field(@field(self, union_field.name), ft_field.name)},
+                                    );
                                 }
                             }
                         },
@@ -136,12 +152,13 @@ pub const Node = struct {
                         else => {},
                     }
                 }
-
             }
             std.debug.print("}}\n", .{});
         }
     };
 
+    // NOTE: IMPORTANT! only pass allocators that do not realloc/move the data (like ArrayList)
+    // since we store raw pointers here
     pub inline fn create(allocator: *std.mem.Allocator) !*Node {
         var new_node = try allocator.create(Node);
         new_node.* = .{
@@ -190,7 +207,7 @@ pub const Node = struct {
         while (dfs.next()) |node_info| {
             if (!node_info.is_end)
                 continue;
-            log.debug("Deleting end {}\n", .{ node_info.data.data });
+            log.debug("Deleting end {}\n", .{node_info.data.data});
             allocator.destroy(node_info.data);
         }
 
@@ -242,7 +259,7 @@ pub const Node = struct {
     pub fn print_direct_children(self: *Node) void {
         var mb_next = self.first_child;
         while (mb_next) |next| {
-            std.debug.print("Child: {}\n", .{ next.data });
+            std.debug.print("Child: {}\n", .{next.data});
             mb_next = next.next;
         }
     }
@@ -267,7 +284,7 @@ pub const Node = struct {
             level += result.lvl_delta;
         }
     }
-    
+
     /// contrary to utils.DepthFirstIterator this iterator does not visit
     /// nodes twice (start/end)
     pub fn dfs_next(self: *@This()) ?*Node {
@@ -330,11 +347,13 @@ test "dfs next" {
     try expect(child1child1child1.dfs_next().? == child1child2);
     try expect(child1child2.dfs_next().? == child2);
 
-    const order = [6]*Node{
-        parent, child1, child1child1, child1child1child1, child1child2, child2 };
+    const order = [6]*Node{ parent, child1, child1child1, child1child1child1, child1child2, child2 };
     var mb_current: ?*Node = parent;
     var i: usize = 0;
-    while (mb_current) |current| : ({ i += 1; mb_current = current.dfs_next(); }) {
+    while (mb_current) |current| : ({
+        i += 1;
+        mb_current = current.dfs_next();
+    }) {
         try expect(current == order[i]);
     }
 
@@ -369,7 +388,7 @@ test "node remove_child first_child of 3" {
 
     parent.remove_child(child1);
     try expect(parent.first_child == child2);
-    try expect(parent.last_child  == child3);
+    try expect(parent.last_child == child3);
 
     try expect(child2.next == child3);
     try expect(child1.next == null);
@@ -395,7 +414,7 @@ test "node remove_child middle_child of 3" {
 
     parent.remove_child(child2);
     try expect(parent.first_child == child1);
-    try expect(parent.last_child  == child3);
+    try expect(parent.last_child == child3);
 
     try expect(child2.next == null);
     try expect(child2.parent == null);
@@ -422,7 +441,7 @@ test "node remove_child last_child of 3" {
 
     parent.remove_child(child3);
     try expect(parent.first_child == child1);
-    try expect(parent.last_child  == child2);
+    try expect(parent.last_child == child2);
 
     try expect(child1.next == child2);
     try expect(child2.next == null);
@@ -443,7 +462,7 @@ test "node remove_child only_child" {
 
     parent.remove_child(child1);
     try expect(parent.first_child == null);
-    try expect(parent.last_child  == null);
+    try expect(parent.last_child == null);
 
     try expect(child1.next == null);
     try expect(child1.parent == null);
@@ -451,23 +470,46 @@ test "node remove_child only_child" {
 
 pub inline fn is_container_block(self: NodeKind) bool {
     return switch (self) {
-        .Document, .BlockQuote, .UnorderedList, .UnorderedListItem, .OrderedList, .OrderedListItem => true,
+        .Document,
+        .BlockQuote,
+        .UnorderedList,
+        .UnorderedListItem,
+        .OrderedList,
+        .OrderedListItem,
+        => true,
         else => false,
     };
 }
 
 pub inline fn is_leaf_block(self: NodeKind) bool {
     return switch (self) {
-        .ThematicBreak, .Heading, .FencedCode, .LinkRef, .Paragraph,
-        .BlankLine, .Image, .MathMultiline => true,
+        .ThematicBreak,
+        .Heading,
+        .FencedCode,
+        .LinkRef,
+        .Paragraph,
+        .BlankLine,
+        .Image,
+        .MathMultiline,
+        => true,
         else => false,
     };
 }
 
 pub inline fn is_inline(self: NodeKind) bool {
     return switch (self) {
-        .CodeSpan, .Emphasis, .StrongEmphasis, .Strikethrough, .Link,
-        .HardLineBreak, .SoftLineBreak, .Text, .Superscript, .Subscript, .MathInline => true,
+        .CodeSpan,
+        .Emphasis,
+        .StrongEmphasis,
+        .Strikethrough,
+        .Link,
+        .HardLineBreak,
+        .SoftLineBreak,
+        .Text,
+        .Superscript,
+        .Subscript,
+        .MathInline,
+        => true,
         else => false,
     };
 }
@@ -488,8 +530,16 @@ pub inline fn can_hold(self: NodeKind, other: NodeKind) bool {
 
 pub inline fn children_allowed(self: NodeKind) bool {
     return switch (self) {
-        .Undefined, .CodeSpan, .ThematicBreak, .LinkRef,
-        .BlankLine, .HardLineBreak, .SoftLineBreak, .Text, .MathInline => false,
+        .Undefined,
+        .CodeSpan,
+        .ThematicBreak,
+        .LinkRef,
+        .BlankLine,
+        .HardLineBreak,
+        .SoftLineBreak,
+        .Text,
+        .MathInline,
+        => false,
         else => true,
     };
 }

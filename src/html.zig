@@ -12,7 +12,7 @@ pub const HTMLGenerator = struct {
     start_node: *Node,
     label_node_map: std.StringHashMap(*Node.NodeData),
 
-    pub const Error = error {
+    pub const Error = error{
         ReferenceLabelNotFound,
         FormatBufferTooSmall,
     };
@@ -21,7 +21,7 @@ pub const HTMLGenerator = struct {
     pub fn init(
         allocator: *std.mem.Allocator,
         start_node: *Node,
-        label_node_map: std.StringHashMap(*Node.NodeData)
+        label_node_map: std.StringHashMap(*Node.NodeData),
     ) HTMLGenerator {
         return HTMLGenerator{
             .allocator = allocator,
@@ -40,7 +40,7 @@ pub const HTMLGenerator = struct {
     pub fn write(
         self: *HTMLGenerator,
         comptime WriterType: type,
-        out_stream: anytype
+        out_stream: anytype,
     ) (Error || WriterType.Error)!void {
         var dfs = DFS(Node, true).init(self.start_node);
 
@@ -69,8 +69,11 @@ pub const HTMLGenerator = struct {
                 .ThematicBreak => try out_stream.writeAll("<hr/>\n"),
                 .Heading => |heading| {
                     var hbuf: [4]u8 = undefined;
-                    _ = std.fmt.bufPrint(&hbuf, "h{}>\n", .{ heading.level })
-                        catch return Error.FormatBufferTooSmall;
+                    _ = std.fmt.bufPrint(
+                        &hbuf,
+                        "h{}>\n",
+                        .{heading.level},
+                    ) catch return Error.FormatBufferTooSmall;
                     if (node_info.is_end) {
                         try out_stream.writeAll("</");
                     } else {
@@ -94,8 +97,11 @@ pub const HTMLGenerator = struct {
                             try out_stream.writeAll("<ol>\n");
                         } else {
                             var numbuf: [4]u8 = undefined;
-                            var numslice = std.fmt.bufPrint(&numbuf, "{}", .{ list.start_num })
-                                catch return Error.FormatBufferTooSmall;
+                            var numslice = std.fmt.bufPrint(
+                                &numbuf,
+                                "{}",
+                                .{list.start_num},
+                            ) catch return Error.FormatBufferTooSmall;
                             try out_stream.writeAll("<ol start=\"");
                             try out_stream.writeAll(numslice);
                             try out_stream.writeAll("\" type=\"");
@@ -245,7 +251,8 @@ pub const HTMLGenerator = struct {
                         } else {
                             HTMLGenerator.report_error(
                                 "No reference definition could be found for label '{s}'!\n",
-                                .{ link.label.? });
+                                .{link.label.?},
+                            );
                             return Error.ReferenceLabelNotFound;
                         }
                     }
@@ -280,7 +287,8 @@ pub const HTMLGenerator = struct {
                         } else {
                             HTMLGenerator.report_error(
                                 "No reference definition could be found for label '{s}'!\n",
-                                .{ img.label.? });
+                                .{img.label.?},
+                            );
                             return Error.ReferenceLabelNotFound;
                         }
                     }
@@ -319,7 +327,8 @@ pub const HTMLGenerator = struct {
                             } else {
                                 HTMLGenerator.report_error(
                                     "No corresponding label could be found for ref '{s}'!\n",
-                                    .{ call.result.?.ref });
+                                    .{call.result.?.ref},
+                                );
                                 return Error.ReferenceLabelNotFound;
                             }
                         },
@@ -330,7 +339,7 @@ pub const HTMLGenerator = struct {
                 .SoftLineBreak => try out_stream.writeByte('\n'),
                 .Text => |text| {
                     if (node_info.data.first_child) |fc| {
-                        log.debug("Text node has child: {}\n", .{ fc.data });
+                        log.debug("Text node has child: {}\n", .{fc.data});
                     }
                     try out_stream.writeAll(text.text);
                 },

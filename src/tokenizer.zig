@@ -2,7 +2,7 @@ const std = @import("std");
 const utils = @import("utils.zig");
 const is_space_or_tab = utils.is_space_or_tab;
 const is_num = utils.is_num;
-const is_end_of_line = utils. is_end_of_line;
+const is_end_of_line = utils.is_end_of_line;
 
 pub const TAB_TO_SPACES = 4;
 pub const SPACES_PER_INDENT = 4;
@@ -16,7 +16,7 @@ pub const TokenKind = enum {
     Asterisk_double,
     Underscore_double,
     Tilde,
-    Tilde_double,  // ~~
+    Tilde_double, // ~~
     Dash,
     Plus,
     Period,
@@ -30,7 +30,7 @@ pub const TokenKind = enum {
     Dollar,
     Dollar_double,
 
-    Exclamation_open_bracket,  // ![
+    Exclamation_open_bracket, // ![
 
     Open_paren,
     Close_paren,
@@ -60,9 +60,9 @@ pub const TokenKind = enum {
     Newline,
     Increase_indent,
     Decrease_indent,
-    Hard_line_break,  // \ in front of a line break
+    Hard_line_break, // \ in front of a line break
 
-    Comment,  // //
+    Comment, // //
 
     Digits,
 
@@ -82,7 +82,7 @@ pub const TokenKind = enum {
             .Asterisk_double => "**",
             .Underscore_double => "__",
             .Tilde => "~",
-            .Tilde_double => "~~",  // ~~
+            .Tilde_double => "~~", // ~~
             .Dash => "-",
             .Plus => "+",
             .Period => ".",
@@ -95,7 +95,7 @@ pub const TokenKind = enum {
             .Dollar => "$",
             .Dollar_double => "$$",
 
-            .Exclamation_open_bracket => "![",  // ![
+            .Exclamation_open_bracket => "![", // ![
 
             .Open_paren => "(",
             .Close_paren => ")",
@@ -161,7 +161,8 @@ pub const Token = struct {
         // make sure we don't call this on sth. that is not 'printable'
         std.debug.assert(switch (self.token_kind) {
             .Decrease_indent, .Eof => false,
-            else => true });
+            else => true,
+        });
 
         return switch (self.token_kind) {
             .Tab => " " ** TAB_TO_SPACES,
@@ -192,7 +193,7 @@ pub const Tokenizer = struct {
     new_indent_idx: u8,
     indent_stack: [50]i16,
 
-    pub const Error = error {
+    pub const Error = error{
         UnmachtingDedent,
         BlankLineContainsWhiteSpace,
         SuddenEndOfFile,
@@ -208,7 +209,7 @@ pub const Tokenizer = struct {
         // TODO just pass buffer and filename, loading of the file should be done elsewhere
         const contents = try file.reader().readAllAlloc(
             allocator,
-            20 * 1024 * 1024,  // max_size 2MiB, returns error.StreamTooLong if file is larger
+            20 * 1024 * 1024, // max_size 2MiB, returns error.StreamTooLong if file is larger
         );
 
         // need to initialize explicitly or leave it undefined
@@ -280,7 +281,7 @@ pub const Tokenizer = struct {
             .start = self.index,
             .end = self.index + 1,
             .column = @intCast(u16, self.index - self.last_line_end_idx),
-            .line_nr = self.line_count, 
+            .line_nr = self.line_count,
         };
 
         // we already advanced to the first non-whitespace byte but we still
@@ -340,17 +341,18 @@ pub const Tokenizer = struct {
                     // make blank lines containing whitespace an error instead
                     // (similar to e.g. PEP8 W293 in python, but more extreme)
                     // TODO is this too obnoxious?
-                    if (self.peek_next_byte()) |next_byte| {  // need this due to compiler bug involving optionals
+                    if (self.peek_next_byte()) |next_byte| { // need this due to compiler bug involving optionals
                         if (indent_spaces > 0 and
-                                (next_byte == @as(u8, '\n') or next_byte == @as(u8, '\r'))) {
+                            (next_byte == @as(u8, '\n') or next_byte == @as(u8, '\r')))
+                        {
                             Tokenizer.report_error(
                                 "ln:{}: Blank line contains whitespace!\n",
-                                .{ self.line_count });  // not tok.line_nr since its the next line
+                                .{self.line_count},
+                            ); // not tok.line_nr since its the next line
                             return Error.BlankLineContainsWhiteSpace;
-
                         }
                     }
-                    
+
                     // dont emit any token for change in indentation level here since we first
                     // need the newline token
                     // check if amount of spaces changed changed
@@ -362,12 +364,12 @@ pub const Tokenizer = struct {
                         self.indent_stack[self.new_indent_idx] = indent_spaces;
                     } else if (indent_delta < 0) {
                         var new_indent_idx = self.indent_idx;
-                        while (self.indent_stack[new_indent_idx] != indent_spaces) : (
-                            new_indent_idx -= 1) {
+                        while (self.indent_stack[new_indent_idx] != indent_spaces) : (new_indent_idx -= 1) {
                             if (new_indent_idx == 0) {
                                 Tokenizer.report_error(
                                     "ln:{}: No indentation level matches the last indent!\n",
-                                    .{ self.line_count });  // not tok.line_nr since its the next line
+                                    .{self.line_count},
+                                ); // not tok.line_nr since its the next line
                                 return Error.UnmachtingDedent;
                             }
                         }
@@ -518,7 +520,6 @@ pub const Tokenizer = struct {
                     } else {
                         break :blk TokenKind.Text;
                     }
-
                 },
 
                 '\\' => blk: {
@@ -543,7 +544,6 @@ pub const Tokenizer = struct {
                     self.advance_to_next_byte();
                     tok.start = self.index;
                     break :blk TokenKind.Text;
-
                 },
 
                 '@' => blk: {
@@ -567,7 +567,8 @@ pub const Tokenizer = struct {
                         // else -> break not hit
                         Tokenizer.report_error(
                             "ln:{}: Hit unexpected EOF while parsing builtin keyword (@keyword(...))\n",
-                            .{ self.line_count });
+                            .{self.line_count},
+                        );
                         return Error.SuddenEndOfFile;
                     }
 
@@ -579,8 +580,28 @@ pub const Tokenizer = struct {
                     // consume everything that's not an inline style
                     while (self.peek_next_byte()) |next_byte| : (self.prechecked_advance_to_next_byte()) {
                         switch (next_byte) {
-                            ' ', '\t', '\r', '\n', '_', '*', '/', '\\', '`', '.',
-                            '<', '[', ']', ')', '"', '~', '^', '$', '=' , ',', '@' => break,
+                            ' ',
+                            '\t',
+                            '\r',
+                            '\n',
+                            '_',
+                            '*',
+                            '/',
+                            '\\',
+                            '`',
+                            '.',
+                            '<',
+                            '[',
+                            ']',
+                            ')',
+                            '"',
+                            '~',
+                            '^',
+                            '$',
+                            '=',
+                            ',',
+                            '@',
+                            => break,
                             else => {},
                         }
                     }

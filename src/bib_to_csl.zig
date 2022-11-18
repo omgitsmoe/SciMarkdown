@@ -6,17 +6,13 @@ const expect = std.testing.expect;
 const bibtex = @import("bibtex.zig");
 const csl = @import("csl_json.zig");
 
-pub const Error = error {
+pub const Error = error{
     NoMatchingItemType,
     NoMatchingField,
 };
 
 /// should be called with an arena allocator
-pub fn bib_to_csl_json(
-    allocator: *std.mem.Allocator,
-    bib: bibtex.Bibliography,
-    comptime copy_strings: bool
-) ![]csl.Item {
+pub fn bib_to_csl_json(allocator: *std.mem.Allocator, bib: bibtex.Bibliography, comptime copy_strings: bool) ![]csl.Item {
     var items = std.ArrayList(csl.Item).init(allocator);
 
     var bib_iter = bib.label_entry_map.iterator();
@@ -25,9 +21,11 @@ pub fn bib_to_csl_json(
         const entry = map_entry.value_ptr;
         var csl_type = bib_entry_to_csl_item(entry._type) catch continue;
 
-        var item = csl.Item.init(
-            allocator, csl_type,
-            .{ .string = try maybe_copy_string(allocator, copy_strings, id) });
+        var item = csl.Item.init(allocator, csl_type, .{ .string = try maybe_copy_string(
+            allocator,
+            copy_strings,
+            id,
+        ) });
 
         var fields_iter = entry.fields.iterator();
         while (fields_iter.next()) |field_entry| {
@@ -35,19 +33,24 @@ pub fn bib_to_csl_json(
             switch (field_name) {
                 .custom, .month, .year => continue,
                 else => set_bib_field_on_csl(
-                    allocator, field_name, field_entry.value_ptr.data,
-                    &item.optionals, copy_strings) catch continue,
+                    allocator,
+                    field_name,
+                    field_entry.value_ptr.data,
+                    &item.optionals,
+                    copy_strings,
+                ) catch continue,
             }
         }
 
         // set month/year separately
         var date_parts_start = try allocator.alloc(csl.OrdinaryVar, 2);
-        const mb_year  = entry.fields.get("year");
+        const mb_year = entry.fields.get("year");
         if (mb_year) |year| {
-            date_parts_start[0] = .{
-                .string = try maybe_copy_string(
-                    allocator, copy_strings, year.data.literal_field.value)
-            };
+            date_parts_start[0] = .{ .string = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                year.data.literal_field.value,
+            ) };
             var slice_idx: u8 = 1;
             // in CSL it's only allowed to specify a month if there was a year specified
             const mb_month = entry.fields.get("month");
@@ -59,18 +62,20 @@ pub fn bib_to_csl_json(
                     if (std.ascii.isAlpha(c)) {
                         break :blk true;
                     }
-                } else eblk: { break :eblk false; };
+                } else eblk: {
+                    break :eblk false;
+                };
 
                 if (contains_alpha) {
                     // convert to number
                     const month_num = try bibtex_month_to_num(month_str);
-                    date_parts_start[1] = .{
-                        .number = month_num
-                    };
+                    date_parts_start[1] = .{ .number = month_num };
                 } else {
-                    date_parts_start[1] = .{
-                        .string = try maybe_copy_string(
-                            allocator, copy_strings, month.data.literal_field.value) };
+                    date_parts_start[1] = .{ .string = try maybe_copy_string(
+                        allocator,
+                        copy_strings,
+                        month.data.literal_field.value,
+                    ) };
                 }
 
                 slice_idx = 2;
@@ -81,15 +86,12 @@ pub fn bib_to_csl_json(
 
             var date_slice = try allocator.create([]csl.OrdinaryVar);
             date_slice.* = date_parts_start[0..slice_idx];
-            try item.optionals.put(
-                "issued",
-                csl.Property{
-                    .issued = .{
-                        // cast *[]OrdinaryVar to ptr to array with size 1 to be able to then slice it
-                        .date = .{ .@"date-parts" = @as(*[1][]csl.OrdinaryVar, date_slice)[0..] }
-                    }
-                }
-            );
+            try item.optionals.put("issued", csl.Property{
+                .issued = .{
+                    // cast *[]OrdinaryVar to ptr to array with size 1 to be able to then slice it
+                    .date = .{ .@"date-parts" = @as(*[1][]csl.OrdinaryVar, date_slice)[0..] },
+                },
+            });
         }
 
         try items.append(item);
@@ -100,11 +102,10 @@ pub fn bib_to_csl_json(
 
 /// only supports english month names for now
 fn bibtex_month_to_num(month: []const u8) !u8 {
-    var buf = [_]u8 { undefined } ** 50;
+    var buf = [_]u8{undefined} ** 50;
     var allocator = std.heap.FixedBufferAllocator.init(buf[0..]);
 
-    const lowercased = try std.ascii.allocLowerString(
-        &allocator.allocator, month);
+    const lowercased = try std.ascii.allocLowerString(&allocator.allocator, month);
     var result: u8 = undefined;
     if (mem.startsWith(u8, lowercased, "jan")) {
         result = 1;
@@ -137,7 +138,6 @@ fn bibtex_month_to_num(month: []const u8) !u8 {
     return result;
 }
 
-
 // TODO proper tests
 test "bib to csl" {
     const alloc = std.testing.allocator;
@@ -146,7 +146,7 @@ test "bib to csl" {
 
     const contents = try file.reader().readAllAlloc(
         alloc,
-        2 * 1024 * 1024,  // max_size 2MiB, returns error.StreamTooLong if file is larger
+        2 * 1024 * 1024, // max_size 2MiB, returns error.StreamTooLong if file is larger
     );
     defer alloc.free(contents);
 
@@ -185,10 +185,16 @@ pub fn bib_entry_to_csl_item(entry_type: bibtex.EntryType) !csl.ItemType {
         .commentary,
         => .article,
 
-        .book, .mvbook, .bookinbook, .booklet,
-        .collection, .mvcollection,
-        .proceedings, .mvproceedings,
-        .reference, .mvreference,
+        .book,
+        .mvbook,
+        .bookinbook,
+        .booklet,
+        .collection,
+        .mvcollection,
+        .proceedings,
+        .mvproceedings,
+        .reference,
+        .mvreference,
         => .book,
 
         .incollection,
@@ -197,79 +203,62 @@ pub fn bib_entry_to_csl_item(entry_type: bibtex.EntryType) !csl.ItemType {
         .suppbook,
         => .chapter,
 
-        .dataset,
-        => .dataset,
+        .dataset => .dataset,
 
         .online,
-        .electronic,  // -> online
-        .www,  // -> online
+        .electronic, // -> online
+        .www, // -> online
         => .webpage,
 
-        .patent,
-        => .patent,
+        .patent => .patent,
 
         .inproceedings,
-        .conference,  // -> inproceedings
+        .conference, // -> inproceedings
         => .@"paper-conference",
 
-        .inreference,
-        => .entry,
+        .inreference => .entry,
 
         .report,
-        .techreport,  // -> report, as type tag
+        .techreport, // -> report, as type tag
         => .report,
 
-        .software,
-        => .software,
+        .software => .software,
 
         .thesis,
-        .mastersthesis,  // special case of thesis, as type tag
-        .phdthesis,  // special case of thesis, as type tag
+        .mastersthesis, // special case of thesis, as type tag
+        .phdthesis, // special case of thesis, as type tag
         => .thesis,
 
-        .unpublished,
-        => .manuscript,
+        .unpublished => .manuscript,
 
-        .artwork,
-        => .graphic,
+        .artwork => .graphic,
 
-        .audio,
-        => .song,
+        .audio => .song,
 
-        .image,
-        => .figure,
+        .image => .figure,
 
-        .jurisdiction,
-        => .legal_case,
+        .jurisdiction => .legal_case,
 
-        .legislation,
-        => .legislation,
+        .legislation => .legislation,
 
-        .legal,
-        => .treaty,
+        .legal => .treaty,
 
-        .letter,
-        => .personal_communication,
+        .letter => .personal_communication,
 
         .movie,
         .video,
         => .motion_picture,
 
-        .music,
-        => .musical_score,
+        .music => .musical_score,
 
-        .review,
-        => .review,
+        .review => .review,
 
         // TODO unsure
-        .manual,
-        => .document,
+        .manual => .document,
 
-        .performance,
-        => .performance,
+        .performance => .performance,
 
-        .standard,
-        => .standard,
+        .standard => .standard,
     };
 }
 
@@ -285,127 +274,221 @@ pub fn set_bib_field_on_csl(
     // NOTE: setting month and year separately so we can build the whole date-parts struct
     // or edtf string
     switch (field_name) {
-        .custom,  // arbitrary name to e.g. save additional info
+        .custom, // arbitrary name to e.g. save additional info
         => return Error.NoMatchingField,
 
-        .abstract,
-        => csl_prop = .{ .abstract = try maybe_copy_string(
-                allocator, copy_strings, field_data.literal_field.value), },
+        .abstract => csl_prop = .{
+            .abstract = try maybe_copy_string(allocator, copy_strings, field_data.literal_field.value),
+        },
 
         // .addendum,
 
         .annotation,
-        .annote,   // alias for annotation
-        => csl_prop = .{ .annote = try maybe_copy_string(
-                    allocator, copy_strings, field_data.literal_field.value), },
+        .annote, // alias for annotation
+        => csl_prop = .{
+            .annote = try maybe_copy_string(allocator, copy_strings, field_data.literal_field.value),
+        },
 
         .booksubtitle,
         .booktitle,
         .booktitleaddon,
-        => csl_prop = .{ .@"container-title" = try maybe_copy_string(
-                    allocator, copy_strings, field_data.literal_field.value), },
+        => csl_prop = .{
+            .@"container-title" = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
-        .chapter,
-        => csl_prop = .{ .@"chapter-number" = .{
-                .string = try maybe_copy_string(
-                    allocator, copy_strings, field_data.literal_field.value), } },
+        .chapter => csl_prop = .{ .@"chapter-number" = .{
+            .string = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        } },
 
-        .edition,
-        => csl_prop = .{ .edition = .{
-                .string = try maybe_copy_string(
-                    allocator, copy_strings, field_data.literal_field.value), } },
+        .edition => csl_prop = .{ .edition = .{
+            .string = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        } },
 
         // TODO on .eid: should start with 'e', pages -> replace '--' with '-'
-        .eid,
-        => csl_prop = .{ .page = .{
-                .string = try maybe_copy_string(
-                    allocator, copy_strings, field_data.literal_field.value), } },
+        .eid => csl_prop = .{ .page = .{
+            .string = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        } },
 
-        .entrysubtype,  // citation-js also has 'type' as target?
-        => csl_prop = .{ .genre = try maybe_copy_string(
-                allocator, copy_strings, field_data.literal_field.value), },
+        .entrysubtype, // citation-js also has 'type' as target?
+        => csl_prop = .{
+            .genre = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
         // .eprintclass,
 
-        .eprinttype,
-        => csl_prop = .{ .PMID = try maybe_copy_string(
-                allocator, copy_strings, field_data.literal_field.value), },
+        .eprinttype => csl_prop = .{
+            .PMID = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
-        .eventtitle,
-        => csl_prop = .{ .@"event-title" = try maybe_copy_string(
-                allocator, copy_strings, field_data.literal_field.value), },
+        .eventtitle => csl_prop = .{
+            .@"event-title" = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
         // .eventtitleaddon,
 
         // TODO only on manuscript when there's no publisher, organization, institution
-        .howpublished,
-        => csl_prop = .{ .publisher = try maybe_copy_string(
-                allocator, copy_strings, field_data.literal_field.value), },
+        .howpublished => csl_prop = .{
+            .publisher = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
         // .indextitle,
 
         // TODO when not patent
-        .isan, .ismn, .isrn, .iswc,
+        .isan,
+        .ismn,
+        .isrn,
+        .iswc,
         => csl_prop = .{ .number = .{
-                .string = try maybe_copy_string(
-                    allocator, copy_strings, field_data.literal_field.value), } },
+            .string = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        } },
 
-        .isbn,
-        => csl_prop = .{ .ISBN = try maybe_copy_string(
-                allocator, copy_strings, field_data.literal_field.value), },
+        .isbn => csl_prop = .{
+            .ISBN = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
-        .issn,
-        => csl_prop = .{ .ISSN = try maybe_copy_string(
-                allocator, copy_strings, field_data.literal_field.value), },
+        .issn => csl_prop = .{
+            .ISSN = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
         // .issue,
 
-        .issuetitle, .issuesubtitle, .issuetitleaddon,
-        => csl_prop = .{ .@"volume-title" = try maybe_copy_string(
-                    allocator, copy_strings, field_data.literal_field.value), },
+        .issuetitle,
+        .issuesubtitle,
+        .issuetitleaddon,
+        => csl_prop = .{
+            .@"volume-title" = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
         // TODO citation-js has target: article, article-newspaper, etc.
-        .journaltitle, .journalsubtitle, .journaltitleaddon,
-        .journal,   // alias -> journaltitle
-        => csl_prop = .{ .@"container-title" = try maybe_copy_string(
-                allocator, copy_strings, field_data.literal_field.value), },
+        .journaltitle,
+        .journalsubtitle,
+        .journaltitleaddon,
+        .journal, // alias -> journaltitle
+        => csl_prop = .{
+            .@"container-title" = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
         // .label,
-        .library,
-        => csl_prop = .{ .@"call-number" = try maybe_copy_string(
-                allocator, copy_strings, field_data.literal_field.value), },
+        .library => csl_prop = .{
+            .@"call-number" = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
-        .mainsubtitle, .maintitle, .maintitleaddon,
-        => csl_prop = .{ .@"container-title" = try maybe_copy_string(
-                allocator, copy_strings, field_data.literal_field.value), },
+        .mainsubtitle,
+        .maintitle,
+        .maintitleaddon,
+        => csl_prop = .{
+            .@"container-title" = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
         // .nameaddon,
-        .note,
-        => csl_prop = .{ .note = try maybe_copy_string(
-                allocator, copy_strings, field_data.literal_field.value), },
+        .note => csl_prop = .{
+            .note = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
-        .number,
-        => csl_prop = .{ .number = .{
-                .string = try maybe_copy_string(
-                    allocator, copy_strings, field_data.literal_field.value), } },
+        .number => csl_prop = .{ .number = .{
+            .string = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        } },
 
-        .origtitle,
-        => csl_prop = .{ .@"original-title" = try maybe_copy_string(
-                allocator, copy_strings, field_data.literal_field.value), },
+        .origtitle => csl_prop = .{
+            .@"original-title" = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
-        .pagetotal,
-        => csl_prop = .{ .@"number-of-pages" = .{
-                .string = try maybe_copy_string(
-                    allocator, copy_strings, field_data.literal_field.value), } },
+        .pagetotal => csl_prop = .{ .@"number-of-pages" = .{
+            .string = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        } },
 
-        .part,
-        => csl_prop = .{ .part = .{ .string = try maybe_copy_string(
-                allocator, copy_strings, field_data.literal_field.value), } },
+        .part => csl_prop = .{ .part = .{
+            .string = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        } },
 
         // .reprinttitle,
-        .series,
-        => csl_prop = .{ .@"collection-title" = try maybe_copy_string(
-                allocator, copy_strings, field_data.literal_field.value), },
+        .series => csl_prop = .{
+            .@"collection-title" = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
         // .shorthand,
         // .shorthandintro,
@@ -413,47 +496,96 @@ pub fn set_bib_field_on_csl(
         .shortjournal,
         .shortseries,
         .shorttitle,
-        => csl_prop = .{ .@"container-title-short" = try maybe_copy_string(
-                    allocator, copy_strings, field_data.literal_field.value), },
+        => csl_prop = .{
+            .@"container-title-short" = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
         .title,
         .titleaddon,
         .subtitle,
-        => csl_prop = .{ .title = try maybe_copy_string(
-                allocator, copy_strings, field_data.literal_field.value), },
-
-        .venue,
-        => csl_prop = .{ .@"event-place" = try maybe_copy_string(
-                    allocator, copy_strings, field_data.literal_field.value), },
-
-        .version,
-        => csl_prop = .{ .version = try maybe_copy_string(
-                    allocator, copy_strings, field_data.literal_field.value), },
-
-        .usera, .userb, .userc, .userd, .usere, .userf,
-        .verba, .verbb, .verbc,
-        .lista, .listb, .listc, .listd, .liste, .listf,
-        => return Error.NoMatchingField,  // TODO custom fields
-
-        .archiveprefix,  // alias -> eprinttype
         => csl_prop = .{
-            .PMID = try maybe_copy_string(allocator, copy_strings, field_data.literal_field.value), },
+            .title = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
+
+        .venue => csl_prop = .{
+            .@"event-place" = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
+
+        .version => csl_prop = .{
+            .version = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
+
+        .usera,
+        .userb,
+        .userc,
+        .userd,
+        .usere,
+        .userf,
+        .verba,
+        .verbb,
+        .verbc,
+        .lista,
+        .listb,
+        .listc,
+        .listd,
+        .liste,
+        .listf,
+        => return Error.NoMatchingField, // TODO custom fields
+
+        .archiveprefix, // alias -> eprinttype
+        => csl_prop = .{
+            .PMID = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.literal_field.value,
+            ),
+        },
 
         // .primaryclass,  // alias -> eprintclass
 
         // afterword,
         // annotator,
-        .author,
-        => csl_prop = try bib_field_extract_name_list(allocator, .author, field_data, copy_strings),
+        .author => csl_prop = try bib_field_extract_name_list(
+            allocator,
+            .author,
+            field_data,
+            copy_strings,
+        ),
 
-        .bookauthor,
-        => csl_prop = try bib_field_extract_name_list(
-            allocator, .@"container-author", field_data, copy_strings),
+        .bookauthor => csl_prop = try bib_field_extract_name_list(
+            allocator,
+            .@"container-author",
+            field_data,
+            copy_strings,
+        ),
 
         // commentator,
         .editor,
-        .editora, .editorb, .editorc,
-        => csl_prop = try bib_field_extract_name_list(allocator, .editor, field_data, copy_strings),
+        .editora,
+        .editorb,
+        .editorc,
+        => csl_prop = try bib_field_extract_name_list(
+            allocator,
+            .editor,
+            field_data,
+            copy_strings,
+        ),
 
         // foreword,
         // holder,
@@ -461,8 +593,12 @@ pub fn set_bib_field_on_csl(
         // shortauthor,
         // shorteditor,
 
-        .translator,
-        => csl_prop = try bib_field_extract_name_list(allocator, .translator, field_data, copy_strings),
+        .translator => csl_prop = try bib_field_extract_name_list(
+            allocator,
+            .translator,
+            field_data,
+            copy_strings,
+        ),
 
         // namea,
         // nameb,
@@ -471,9 +607,9 @@ pub fn set_bib_field_on_csl(
         // key_field START
         // authortype,
         // TODO unsure v
-        .bookpagination,
-        => csl_prop = .{
-            .section = try maybe_copy_string(allocator, copy_strings, field_data.key_field.value), },
+        .bookpagination => csl_prop = .{
+            .section = try maybe_copy_string(allocator, copy_strings, field_data.key_field.value),
+        },
 
         // TODO can be used to assign editor[a-c] to compiler, organizer, ...
         // editortype,
@@ -496,88 +632,161 @@ pub fn set_bib_field_on_csl(
         // raw field of date is now supposed to be treated like edtf
         // (see https://discourse.citationstyles.org/t/raw-dates-vs-date-parts/1533/11)
         // literal is used to inlcude additional descriptions in the date
-        .date,
-        => csl_prop = .{ .issued = .{
-                .edtf = try maybe_copy_string(
-                    allocator, copy_strings, field_data.date_field.value), } },
+        .date => csl_prop = .{ .issued = .{
+            .edtf = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.date_field.value,
+            ),
+        } },
 
-        .eventdate,
-        => csl_prop = .{ .@"event-date" = .{
-                .edtf = try maybe_copy_string(
-                    allocator, copy_strings, field_data.date_field.value), } },
+        .eventdate => csl_prop = .{ .@"event-date" = .{
+            .edtf = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.date_field.value,
+            ),
+        } },
 
-        .origdate,
-        => csl_prop = .{ .@"original-date" = .{
-                    .edtf = try maybe_copy_string(
-                        allocator, copy_strings, field_data.date_field.value), } },
+        .origdate => csl_prop = .{ .@"original-date" = .{
+            .edtf = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.date_field.value,
+            ),
+        } },
 
-        .urldate,
-        => csl_prop = .{ .accessed = .{
-                .edtf = try maybe_copy_string(
-                    allocator, copy_strings, field_data.date_field.value), } },
+        .urldate => csl_prop = .{ .accessed = .{
+            .edtf = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.date_field.value,
+            ),
+        } },
 
         //
-        .doi,
-        => csl_prop = .{ .DOI = try maybe_copy_string(
-                allocator, copy_strings, field_data.verbatim_field.value), },
+        .doi => csl_prop = .{
+            .DOI = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.verbatim_field.value,
+            ),
+        },
 
-        .eprint,
-        => csl_prop = .{ .PMID = try maybe_copy_string(
-                allocator, copy_strings, field_data.verbatim_field.value), },
+        .eprint => csl_prop = .{
+            .PMID = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.verbatim_field.value,
+            ),
+        },
 
         // TODO custom
         // file,
         // pdf,   // alias -> file
         .institution,
-        .school,   // alias -> institution
-        => csl_prop = try bib_field_extract_list(allocator, .publisher, .literal_list, field_data, copy_strings),
+        .school, // alias -> institution
+        => csl_prop = try bib_field_extract_list(
+            allocator,
+            .publisher,
+            .literal_list,
+            field_data,
+            copy_strings,
+        ),
 
         // TODO 'jurisdiction' when type patent
         .location,
-        .address,  // alias for location
+        .address, // alias for location
         => csl_prop = try bib_field_extract_list(
-            allocator, .@"publisher-place", .literal_list, field_data, copy_strings),
+            allocator,
+            .@"publisher-place",
+            .literal_list,
+            field_data,
+            copy_strings,
+        ),
 
-        .organization,
-        => csl_prop = try bib_field_extract_list(allocator, .publisher, .literal_list, field_data, copy_strings),
+        .organization => csl_prop = try bib_field_extract_list(
+            allocator,
+            .publisher,
+            .literal_list,
+            field_data,
+            copy_strings,
+        ),
 
-        .origlocation,
-        => csl_prop = try bib_field_extract_list(
-            allocator, .@"original-publisher-place", .literal_list, field_data, copy_strings),
+        .origlocation => csl_prop = try bib_field_extract_list(
+            allocator,
+            .@"original-publisher-place",
+            .literal_list,
+            field_data,
+            copy_strings,
+        ),
 
-        .origpublisher,
-        => csl_prop = try bib_field_extract_list(
-            allocator, .@"original-publisher", .literal_list, field_data, copy_strings),
+        .origpublisher => csl_prop = try bib_field_extract_list(
+            allocator,
+            .@"original-publisher",
+            .literal_list,
+            field_data,
+            copy_strings,
+        ),
 
-        .publisher,
-        => csl_prop = try bib_field_extract_list(allocator, .publisher, .literal_list, field_data, copy_strings),
+        .publisher => csl_prop = try bib_field_extract_list(
+            allocator,
+            .publisher,
+            .literal_list,
+            field_data,
+            copy_strings,
+        ),
 
-        .pubstate,
-        => csl_prop = try bib_field_extract_list(allocator, .status, .literal_list, field_data, copy_strings),
+        .pubstate => csl_prop = try bib_field_extract_list(
+            allocator,
+            .status,
+            .literal_list,
+            field_data,
+            copy_strings,
+        ),
 
-        .language,
-        => csl_prop = try bib_field_extract_list(allocator, .language, .key_list, field_data, copy_strings),
+        .language => csl_prop = try bib_field_extract_list(
+            allocator,
+            .language,
+            .key_list,
+            field_data,
+            copy_strings,
+        ),
 
         // origlanguage,
-        .pages,
-        => csl_prop = .{ .page = .{
-                .string = try maybe_copy_string(
-                    allocator, copy_strings, field_data.range_field.value), } },
+        .pages => csl_prop = .{ .page = .{
+            .string = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.range_field.value,
+            ),
+        } },
 
-        .url,
-        => csl_prop = .{ .URL = try maybe_copy_string(allocator, copy_strings, field_data.uri_field.value), },
-
-        .volume,
-        => csl_prop = .{ .volume = .{ 
-                .string = try maybe_copy_string(
-                    allocator, copy_strings, field_data.integer_field.value), }, },
-
-        .volumes,
-        => csl_prop = .{ .@"number-of-volumes" = .{
-                    .string = try maybe_copy_string(
-                        allocator, copy_strings, field_data.integer_field.value),
-            }
+        .url => csl_prop = .{
+            .URL = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.uri_field.value,
+            ),
         },
+
+        .volume => csl_prop = .{
+            .volume = .{
+                .string = try maybe_copy_string(
+                    allocator,
+                    copy_strings,
+                    field_data.integer_field.value,
+                ),
+            },
+        },
+
+        .volumes => csl_prop = .{ .@"number-of-volumes" = .{
+            .string = try maybe_copy_string(
+                allocator,
+                copy_strings,
+                field_data.integer_field.value,
+            ),
+        } },
 
         // special fields START
         // .ids, .crossref, .fakeset, .gender, .entryset, .execute,
@@ -606,14 +815,21 @@ fn bib_field_extract_name_list(
         var bt_name = try bibtex.ListField.parse_name(name_literal);
         try names.append(.{
             .family = if (bt_name.last) |last|
-                try maybe_copy_string(allocator, copy_strings, last) else null,
+                try maybe_copy_string(allocator, copy_strings, last)
+            else
+                null,
             .given = if (bt_name.first) |first|
-                try maybe_copy_string(allocator, copy_strings, first) else null,
-            .@"non-dropping-particle" =
-                if (bt_name.prefix) |prefix|
-                    try maybe_copy_string(allocator, copy_strings, prefix) else null,
+                try maybe_copy_string(allocator, copy_strings, first)
+            else
+                null,
+            .@"non-dropping-particle" = if (bt_name.prefix) |prefix|
+                try maybe_copy_string(allocator, copy_strings, prefix)
+            else
+                null,
             .suffix = if (bt_name.suffix) |suffix|
-                try maybe_copy_string(allocator, copy_strings, suffix) else null,
+                try maybe_copy_string(allocator, copy_strings, suffix)
+            else
+                null,
         });
     }
 
@@ -633,7 +849,7 @@ fn bib_field_extract_list(
 
     // NOTE: this only works since we know that our bibtex parser doesn't re-allocate
     // the single list items but just creates slices into the bibtex file content
-    var result: []const u8 = &[_]u8 {};  // empty string
+    var result: []const u8 = &[_]u8{}; // empty string
     if (list.len > 0) {
         const first = list[0];
         const last = list[list.len - 1];
