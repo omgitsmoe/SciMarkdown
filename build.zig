@@ -1,31 +1,23 @@
 const std = @import("std");
 
 const Builder = std.build.Builder;
-const Mode = builtin.Mode;
 
 pub fn build(b: *Builder) void {
     const mode = b.standardReleaseOptions();
     const target = b.standardTargetOptions(.{});
+    const stage1 = b.option(bool, "stage1", "Use the stage 1 compiler") orelse false;
 
-    const test_all_step = b.step("test", "Run all tests in all modes.");
-    inline for (@typeInfo(std.builtin.Mode).Enum.fields) |field| {
-        const test_mode = @field(std.builtin.Mode, field.name);
-        const mode_str = @tagName(test_mode);
-
-        const tests = b.addTest("clap.zig");
-        tests.setBuildMode(test_mode);
-        tests.setTarget(target);
-
-        const test_step = b.step("test-" ++ mode_str, "Run all tests in " ++ mode_str ++ ".");
-        test_step.dependOn(&tests.step);
-        test_all_step.dependOn(test_step);
-    }
+    const test_step = b.step("test", "Run all tests in all modes.");
+    const tests = b.addTest("clap.zig");
+    tests.setBuildMode(mode);
+    tests.setTarget(target);
+    tests.use_stage1 = stage1;
+    test_step.dependOn(&tests.step);
 
     const example_step = b.step("examples", "Build examples");
     inline for (.{
         "simple",
         "simple-ex",
-        //"simple-error",
         "streaming-clap",
         "help",
         "usage",
@@ -44,7 +36,7 @@ pub fn build(b: *Builder) void {
     readme_step.dependOn(readme);
 
     const all_step = b.step("all", "Build everything and runs all tests");
-    all_step.dependOn(test_all_step);
+    all_step.dependOn(test_step);
     all_step.dependOn(example_step);
     all_step.dependOn(readme_step);
 
@@ -53,7 +45,7 @@ pub fn build(b: *Builder) void {
 
 fn readMeStep(b: *Builder) *std.build.Step {
     const s = b.allocator.create(std.build.Step) catch unreachable;
-    s.* = std.build.Step.init(.Custom, "ReadMeStep", b.allocator, struct {
+    s.* = std.build.Step.init(.custom, "ReadMeStep", b.allocator, struct {
         fn make(step: *std.build.Step) anyerror!void {
             @setEvalBranchQuota(10000);
             _ = step;
@@ -61,7 +53,7 @@ fn readMeStep(b: *Builder) *std.build.Step {
             const stream = file.writer();
             try stream.print(@embedFile("example/README.md.template"), .{
                 @embedFile("example/simple.zig"),
-                @embedFile("example/simple-error.zig"),
+                @embedFile("example/simple-ex.zig"),
                 @embedFile("example/streaming-clap.zig"),
                 @embedFile("example/help.zig"),
                 @embedFile("example/usage.zig"),

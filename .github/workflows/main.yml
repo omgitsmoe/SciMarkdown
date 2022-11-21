@@ -2,23 +2,31 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: '0 0 * * *'
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        step: [examples, test]
+        compiler: [stage1=true, stage1=false]
+        release: [release-safe=false, release-safe=true, release-fast=true, release-small=true]
+    runs-on: ${{matrix.os}}
     steps:
-      - uses: actions/checkout@v2.3.4
+      - uses: actions/checkout@v3
         with:
           submodules: recursive
-      - uses: goto-bus-stop/setup-zig@v1.3.0
+      - uses: goto-bus-stop/setup-zig@v2.0.1
         with:
-          version: 0.8.0
-      - run: zig build
+          version: master
+      - run: zig build ${{ matrix.step }} -D${{ matrix.compiler }} -D${{ matrix.release }}
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v2.3.4
-      - uses: goto-bus-stop/setup-zig@v1.3.0
+      - uses: actions/checkout@v3
+      - uses: goto-bus-stop/setup-zig@v2.0.1
         with:
-          version: 0.8.0
+          version: master
       - run: zig fmt --check .
