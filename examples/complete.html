@@ -1,0 +1,505 @@
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<script id="MathJax-script" async src="vendor/mathjax-3.1.2/tex-svg-full.js"></script>
+<link type="text/css" rel="stylesheet" href="html/style.css">
+</head>
+<body>
+<div class="content-wrapper"><h2>
+Headings</h2>
+<h1>
+H1</h1>
+<h2>
+H2</h2>
+<h3>
+H3</h3>
+<h4>
+H4</h4>
+<h5>
+H5</h5>
+<h6>
+H6</h6>
+<h4>
+Headline / with # other + kinds tokens</h4>
+<h4>
+<strong>Fat head</strong> <em>cursive</em> <a href="https://google.com">link</a></h4>
+<h2>
+Paragraph</h2>
+<p>
+Lorem ipsum dolor sit amet, consetetur sadipscing elitr, sed diam
+nonumy eirmod tempor invidunt ut.
+Paragraphs end after two line breaks / a blank line, otherwise
+the newline is just interpreted as a space.
+</p>
+<p>
+A backslash at the end of the line forces a line break <br/>
+
+Labore et dolore magna aliquyam erat, sed diam voluptua.
+</p>
+<p>
+At vero eos et accusam et justo
+duo dolores et ea rebum. Stet clita kasd gubergren.
+</p>
+<p>
+Links spanning over a line break <a href="https://link-wrapping-lines.com">linkwrapping lines</a> same for <strong>emphasis
+here</strong>
+</p>
+<h2>
+Text styles</h2>
+<p>
+Emphasis, aka italics, with <em>asterisks</em> or <em>underscores</em>.
+</p>
+<p>
+Strong emphasis, aka bold, with <strong>asterisks</strong> or <strong>underscores</strong>.
+</p>
+<p>
+Combined emphasis with <strong>asterisks and <em>underscores</em></strong>.
+</p>
+<p>
+Normal text with\_underscore and aster\*
+</p>
+<p>
+Strikethrough uses two tildes. <strike>Scratch this.</strike>
+</p>
+<p>
+H<sub>2</sub>O is a liquid.  2<sup>10</sup> is 1024.
+</p>
+<h2>
+Comments</h2>
+<p>
+This is a normal paragraph, nothing to see here! 
+</p>
+<h2>
+Lists</h2>
+<ol>
+<li>
+<p>
+First ordered list item
+multi-line <a href="https://google.com">linktext wrap</a>
+but this will still be rendered on one line
+</p>
+</li>
+<li>
+<p>
+Another item
+</p>
+<ul>
+<li>
+Unordered sub-list.
+</li>
+</ul>
+</li>
+<li>
+<p>
+Actual numbers don't matter, just that it's a number
+continue
+</p>
+<ol start="12" type="1">
+<li>
+But the first number of an ordered list determines the start number!
+Line continues
+</li>
+<li>
+Should be 13.
+Line continues
+</li>
+<li>
+Should be 14.
+</li>
+</ol>
+</li>
+<li>
+<p>
+And another item.
+</p>
+<p>
+You can have properly indented paragraphs within list items. Notice the blank line above, and the leading spaces (at least one, but we'll use three here to also align the raw Markdown).
+</p>
+<p>
+To have a line break without a paragraph, you will need to end the line with a <br/>
+
+Note that this line is separate, but within the same paragraph.  
+(This is contrary to the typical GFM line break behaviour, where trailing spaces are not required.)
+</p>
+<p>
+Should be sep paragraph
+</p>
+</li>
+</ol>
+<ul>
+<li>
+Or minuses
+</li>
+</ul>
+<ul>
+<li>
+<p>
+Or pluses
+</p>
+</li>
+<li>
+<p>
+test
+</p>
+<p>
+test
+</p>
+</li>
+</ul>
+<ul>
+<li>
+<p>
+other
+</p>
+</li>
+<li>
+<p>
+continued list, which is now loose and will have all items rendered inside a paragraph
+</p>
+</li>
+</ul>
+<ul>
+<li>
+No indent
+<ul>
+<li>
+First indent
+<ul>
+<li>
+Second indent
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>
+Dropping two indents
+</li>
+</ul>
+<ol>
+<li>
+ordered
+</li>
+</ol>
+<ol start="1" type="a">
+<li>
+Ordered lists can also be started with a single letter of a-z or A-Z
+</li>
+<li>
+next
+</li>
+</ol>
+<ol start="1" type="A">
+<li>
+Other list
+<ol start="1" type="A">
+<li>
+Other sublist
+</li>
+</ol>
+</li>
+</ol>
+<ol start="4" type="a">
+<li>
+Another
+<ul>
+<li>
+test
+test
+</li>
+</ul>
+</li>
+</ol>
+<ul>
+<li>
+other kind
+</li>
+</ul>
+<ol start="1" type="a">
+<li>
+blabla
+</li>
+</ol>
+<h2>
+Blockquote</h2>
+<blockquote>
+<h2>
+Headline inside blockquote</h2>
+<p>
+Paragraph paragraph paragraph paragraph paragraph paragraph
+Paragraph paragraph paragraph paragraph paragraph paragraph
+</p>
+<p>
+Paragraph paragraph paragraph paragraph paragraph paragraph
+</p>
+<ul>
+<li>
+List 1
+<ul>
+<li>
+Sublist 1
+</li>
+</ul>
+</li>
+<li>
+List 1 continue
+</li>
+</ul>
+<ul>
+<li>
+List 2
+</li>
+</ul>
+</blockquote>
+<blockquote>
+<p>
+Blockquotes are very handy in email to emulate reply text.
+This line is part of the same quote.
+</p>
+</blockquote>
+<p>
+Quote break.
+</p>
+<blockquote>
+<p>
+This is a very long line that will still be quoted properly when it wraps. Oh boy let's keep writing to make sure this is long enough to actually wrap for everyone. Oh, you can <em>put</em> <strong>Markdown</strong> into a blockquote. 
+</p>
+</blockquote>
+<h2>
+Links and Refs</h2>
+<p>
+<a href="https://www.google.com">I'm an inline-style link</a>
+</p>
+<p>
+<a href="https://www.google.com"title="Google's Homepage">I'm an inline-style link with title</a>
+</p>
+<p>
+<a href="https://www.mozilla.org">I'm a reference-style link</a>
+</p>
+<p>
+<a href="../blob/master/LICENSE">I'm a relative reference to a repository file</a>
+</p>
+<p>
+<a href="http://slashdot.org">You can use numbers for reference-style link definitions</a>
+</p>
+<p>
+Or leave it empty and use the <a href="http://www.reddit.com"title="Link title">link text itself</a>.
+</p>
+<p>
+Some text to show that the reference links can follow later.
+</p>
+<h2>
+Images</h2>
+<p>
+Here's our logo (hover to see the title text):
+</p>
+<p>
+Inline-style: 
+</p>
+<img src="https://github.com/adam-p/markdown-here/raw/master/src/common/images/icon48.png" alt="alt text" title="Logo Title Text 1" /><p>
+Reference-style: 
+</p>
+<img src="https://github.com/adam-p/markdown-here/raw/master/src/common/images/icon48.png" alt="alt text" title="Logo Title Text 2" /><h2>
+Code</h2>
+<p>
+Inline <code>code</code> has <code>back-ticks around</code> it.
+</p>
+<p>
+If a code span would contain a back-tick you can use two back-ticks instead:
+<code>code with ` can't end on `! </code>
+</p>
+<pre><code>var s = "JavaScript syntax highlighting";
+alert(s);
+</code></pre>
+<span id="first-python-code-block"></span><pre><code>
+s = "Python syntax highlighting"
+if s == "":
+    if len(s.split()) > 3:
+        print(s)
+else:
+    print(s)
+</code></pre>
+<pre><code>import matplotlib.pyplot as plt
+plt.plot([1, 2, 3, 4])
+plt.ylabel('some numbers')
+# will just show the interactive window but won't automatically save the output
+# like you may be used to with e.g. jupyter notebook
+# plt.show()
+# using plt.savefig etc. is preferred here, since better formats that are more
+# suitable for publishing can be used etc.
+print("second print")
+</code></pre>
+<pre><code># a = 5 + 'a'
+</code></pre>
+<pre><code># d <- function(x) { x + 'a' }
+# f <- function(x) { d(x) }
+# a = f(5)
+</code></pre>
+<p>
+Python inline: <code>print("printed from within python")</code>
+</p>
+<pre><code>print("r test")
+write("stderr r test", stderr())
+</code></pre>
+<pre><code>print("other chunk")
+print(5 * 25)
+</code></pre>
+<p>
+R inline: <code>cat("printed from within R")</code>
+</p>
+<p>
+R inline with print: <code>print("printed from within R")</code>
+</p>
+<pre><code>%% same comment token as we have
+No language indicated, so no syntax highlighting. 
+But let's throw in a <b>tag</b>.
+%% test that indents get printed
+if s == "":
+    if len(s.split()) > 3:
+        print s
+</code></pre>
+<h2>
+Math</h2>
+<p>
+When \(a \ne 0\), there are two solutions to \(ax^2 + bx + c = 0\) and they are:
+</p>
+<span id="eq:1"></span>$$x = {-b \pm \sqrt{b^2-4ac} \over 2a}.
+ $$
+<p>
+See <a href="#eq:1">MathMultiline</a>
+</p>
+<p>
+Digits that immediately follow a \$ sign will not start an inline math spa
+so prices like $50 etc. don't have to be escaped!
+</p>
+<h2>
+Tables</h2>
+<p>
+Colons can be used to align columns.
+</p>
+<p>
+| Tables        | Are           | Cool  |
+| ------------- |:-------------:| -----:|
+| col 3 is      | right-aligned | \$1600 
+| col 2 is      | centered      |   \$12 
+| zebra stripes | are neat      |    \$1 
+</p>
+<p>
+There must be at least 3 dashes separating each header cell.
+The outer pipes (|) are mandatory, and you don't need to make the 
+raw Markdown line up prettily. You can also use inline Markdown.
+</p>
+<p>
+| Markdown | Less | Pretty
+| --- | --- | ---
+| <em>Still</em> | <code>renders</code> | <strong>nicely</strong>
+| 1 | 2 | 3
+</p>
+<p>
+<strong>Inline HTML removed in this markdown style!</strong>
+</p>
+<h2>
+Horizontal rule</h2>
+<p>
+Three or more hyphens
+</p>
+<hr/>
+<h2>
+Line breaks</h2>
+<p>
+Here's a line for us to start with.
+</p>
+<p>
+This line is separated from the one above by two newlines, so it will be a <em>separate paragraph</em>.
+</p>
+<p>
+This line is also a separate paragraph, but...
+This line is only separated by a single newline or space, so it's a separate line in the <em>same paragraph</em>.
+</p>
+<h2>
+Labels and References <span id="h:labels"></span></h2>
+<p>
+<span id="para"></span> You can label the environment/block you're inside of by using the builtin <code>@label(label text)</code>
+</p>
+<ol>
+<li>
+<span id="ol:one"></span>
+First ordered list item
+multi-line <a href="https://google.com">linktext wrap</a>
+but this will still be rendered on one line
+</li>
+</ol>
+<p>
+To cross-reference a label use the builtin <code>@ref(label text)</code>:
+</p>
+<ul>
+<li>
+See section <a href="#h:labels">Heading</a>
+</li>
+<li>
+Listing <a href="#ol:one">Paragraph</a>
+</li>
+<li>
+Python <a href="#first-python-code-block">FencedCode</a>
+</li>
+<li>
+Para <a href="#para">Paragraph</a>
+</li>
+<li>
+Below ref use <a href="#h:below-ref">Heading</a>
+</li>
+</ul>
+<h3>
+Below <span id="h:below-ref"></span></h3>
+<p>
+Position of label/ref in relation to each other does not matter!
+</p>
+<h2>
+Citations</h2>
+<p>
+Blah blah (Burt, Disney, & Calders, 2018; Seidel, 2018, pp. 33–35)
+</p>
+<p>
+Blah blah (Schroeder, 1991, pp. 33–35\, 38–39 and leading space).
+</p>
+<p>
+Omit author name: Carlsson says blah (1997).
+</p>
+<p>
+In-text citation: Pukkala & Kolström (1987) says blah.
+</p>
+<p>
+With locator: Biging & Dobbertin (1992, p. 33) says blah.
+</p>
+<p>
+Secondary citation: (Roloff, 2014, S. 147; zitiert nach Roloff (2018))
+</p>
+<h2>
+Bibliography</h2>
+<p>
+<p>
+Biging, G., & Dobbertin, M. (1992). A comparison of distance-dependent competition measures for height and basal area growth of individual conifer trees. <em>Forest science.</em>, <em>38</em>, 695—720. Abgerufen von http://europepmc.org/abstract/AGR/IND92055194</p>
+<p>
+Burt, A., Disney, M., & Calders, K. (2018). Extracting individual trees from lidar point clouds using treeseg. <em>Methods in Ecology and Evolution</em>. https://doi.org/10.1111/2041-210x.13121</p>
+<p>
+Carlson, T., & Ripley, D. (1997). On the Relation between NDVI, Fractional Vegetation Cover, and Leaf Area Index. <em>Remote Sensing of Environment</em>, <em>62</em>, 241–252. https://doi.org/10.1016/S0034-4257(97)00104-1</p>
+<p>
+Pukkala, T., & Kolström, T. (1987). Competition indices and the prediction of radial growth in Scots pine. <em>Silva Fennica. 1987. 21(1): 55-67.</em>, <em>21</em>. https://doi.org/10.14214/sf.a15463</p>
+<p>
+Roloff, A. (2014). Aktuelles zur Vitalitätsbeurteilung anhand der Kronenstruktur - Erfahrungen und Konsequenzen. In A. Roloff, D. Thiel, & W. H. (Hrsg.), <em>Baumpflege & Naturschutz und Aktuelles zur Verwendung und Pflege von Stadtbäumen Tagungsband Dresdner StadtBaumtage in Freital 13./14.03.2014</em> (S. 21--32). Tharandt.</p>
+<p>
+Roloff, A. (2018). <em>Vitalitätsbeurteilung von Bäumen</em>. Haymarket Media GmbH. Abgerufen von https://www.ebook.de/de/product/29930309/andreas_roloff_vitalitaetsbeurteilung_von_baeumen.html</p>
+<p>
+Schroeder, M. (1991). <em>Fractals, Chaos, Power Laws</em>. W. H. Freeman and Company.</p>
+<p>
+Seidel, D. (2018). A holistic approach to determine tree structural complexity based on laser scanning data and fractal analysis. <em>Ecology and Evolution</em>, <em>8</em>, 128--134. https://doi.org/10.1002/ece3.3661</p>
+
+</p>
+<h2>
+Other</h2>
+<p>
+Smallcaps: <span style="font-variant: small-caps;">Mueller</span>
+</p>
+</div></body>
+</html>
