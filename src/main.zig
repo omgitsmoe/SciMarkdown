@@ -17,58 +17,49 @@ pub fn main() !void {
     // takes a config struct (empty here .{})
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer {
-        _ = gpa.deinit();
+        const leaked = gpa.deinit();
+        if (leaked) std.testing.expect(false) catch @panic("TEST FAIL"); //fail test; can't try in defer as defer is executed after we return
         // print takes a format string and a struct
         // prints automatically std.debug.print("Leak detected: {}\n", .{leaked});
     }
-    const allocator = &gpa.allocator;
+    const allocator = gpa.allocator();
     // const allocator = std.heap.page_allocator;
 
     // We can use `parseParam` to parse a string to a `Param(Help)`
     @setEvalBranchQuota(2000);
-    const params = comptime [_]clap.Param(clap.Help){
-        clap.parseParam("-h, --help                       Display this help and exit.") catch unreachable,
-        clap.parseParam("-o, --out <FILENAME>             Output filename.") catch unreachable,
-        clap.parseParam("-r, --references <FILENAME>      Path to references file (BibLaTeX or CSL-JSON).") catch unreachable,
-        clap.parseParam("-s, --citation-style <FILENAME>  Path to CSL file.") catch unreachable,
-        clap.parseParam("-l, --locale <LOCALE>  Specify locale as BCP 47 language tag.") catch unreachable,
-        clap.parseParam("--write-bib-conversion           Whether to write out the converted .bib file as CSL-JSON") catch unreachable,
-        // clap.parseParam(
-        //     "-s, --string <STR>...  An option parameter which can be specified multiple times.") catch unreachable,
-        clap.parseParam("<IN-FILE>") catch unreachable,
+    const params = comptime clap.parseParamsComptime(
+        \\-h, --help                       Display this help and exit.
+        \\-o, --out <FILENAME>             Output filename.
+        \\-r, --references <FILENAME>      Path to references file (BibLaTeX or CSL-JSON).
+        \\-s, --citation-style <FILENAME>  Path to CSL file.
+        \\-l, --locale <LOCALE>  Specify locale as BCP 47 language tag.
+        \\--write-bib-conversion           Whether to write out the converted .bib file as CSL-JSON
+        \\<IN-FILE>
+        \\
+    );
+
+    // Declare our own parsers which are used to map the argument strings to other types.
+    const parsers = comptime .{
+        .FILENAME = clap.parsers.string,
+        .LOCALE = clap.parsers.string,
+        .@"IN-FILE" = clap.parsers.string,
     };
 
     // Initalize our diagnostics, which can be used for reporting useful errors.
     // This is optional. You can also pass `.{}` to `clap.parse` if you don't
     // care about the extra information `Diagnostics` provides.
     var diag = clap.Diagnostic{};
-
-    // TODO use parseEx since using clap.parse directly is bugged even though
-    // it's just a thin wrapper https://github.com/Hejsil/zig-clap/issues/43
-    // somehow the cause of the issue is parseEx reusing OsIterator's allocator
-    // var args = clap.parse(clap.Help, &params, .{ .diagnostic = &diag, .allocator = allocator }) catch |err| {
-    //     // Report useful error and exit
-    //     diag.report(std.io.getStdErr().writer(), err) catch {};
-    //     return err;
-    // };
-    // defer args.deinit();
-
-    // We then initialize an argument iterator. We will use the OsIterator as it nicely
-    // wraps iterating over arguments the most efficient way on each os.
-    var iter = try clap.args.OsIterator.init(allocator);
-    defer iter.deinit();
-
-    var args = clap.parseEx(clap.Help, &params, &iter, .{
-        .allocator = allocator,
+    var res = clap.parse(clap.Help, &params, parsers, .{
         .diagnostic = &diag,
     }) catch |err| {
         // Report useful error and exit
         diag.report(std.io.getStdErr().writer(), err) catch {};
         return err;
     };
-    defer args.deinit();
+    defer res.deinit();
+    const args = res.args;
 
-    if (args.flag("--help") or args.positionals().len != 1) {
+    if (args.help or res.positionals.len != 1) {
         const writer = std.io.getStdErr().writer();
         if (builtin.os.tag == .windows) {
             try writer.writeAll("Usage: scimd.exe ");
@@ -76,19 +67,19 @@ pub fn main() !void {
             try writer.writeAll("Usage: scimd ");
         }
 
-        try clap.usage(writer, &params);
+        try clap.usage(writer, clap.Help, &params);
         try writer.writeByte('\n');
-        try clap.help(writer, &params);
+        try clap.help(writer, clap.Help, &params, .{});
 
         std.process.exit(1);
     }
 
-    const pos_args = args.positionals();
+    const pos_args = res.positionals;
     const in_file = pos_args[0];
     log.debug("In file: {s}\n", .{in_file});
 
     var out_filename: []const u8 = undefined;
-    if (args.option("--out")) |out| {
+    if (args.out) |out| {
         log.debug("Out direct: {s}\n", .{out});
         out_filename = out;
     } else {
@@ -106,15 +97,15 @@ pub fn main() !void {
     log.debug("Out file: {s}\n", .{out_filename});
 
     var ref_file: ?[]const u8 = null;
-    if (args.option("--references")) |ref_fn| {
+    if (args.references) |ref_fn| {
         ref_file = ref_fn;
     }
     var csl_file: ?[]const u8 = null;
-    if (args.option("--citation-style")) |csl_fn| {
+    if (args.@"citation-style") |csl_fn| {
         csl_file = csl_fn;
     }
     var csl_locale: ?[]const u8 = null;
-    if (args.option("--locale")) |csl_loc| {
+    if (args.locale) |csl_loc| {
         csl_locale = csl_loc;
     }
 
@@ -147,12 +138,13 @@ pub fn main() !void {
 
     if (parser.citations.items.len > 0 and (ref_file != null or csl_file != null)) {
         if (ref_file != null and csl_file != null and csl_locale != null) {
-            const write_conversion = args.flag("--write-bib-conversion");
+            const write_conversion = args.@"write-bib-conversion";
             const csl_json_result = try cite.csl_items_from_file(allocator, ref_file.?, write_conversion);
             defer csl_json_result.arena.deinit();
 
+            std.debug.print("loc {s}\n", .{ csl_locale orelse "null" });
             const bib_entries = run_citeproc(
-                &parser.node_arena.allocator,
+                parser.node_arena.allocator(),
                 parser.citations.items,
                 csl_json_result.items,
                 csl_file.?,

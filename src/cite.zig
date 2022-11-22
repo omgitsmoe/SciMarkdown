@@ -51,7 +51,7 @@ pub const Format = enum {
 /// will use json's memory for strings
 /// caller takes ownership
 pub fn nodes_from_citeproc_json(
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     json: []const u8,
     cite_nodes: []*Node, // TODO NodeKind.Citation nodes in the same order as citations were passed to citeproc
 ) ![]*Node {
@@ -92,7 +92,7 @@ pub fn nodes_from_citeproc_json(
 
 /// adds formatted ast.Nodes to first_parent from a Citeproc formatted string in json
 fn nodes_from_formatted(
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     formatted_items: []const std.json.Value,
     first_parent: *Node,
 ) !void {
@@ -180,7 +180,7 @@ fn nodes_from_formatted(
 /// since the caller takes ownership of stdout and stderr that are
 /// currently not passed TODO
 pub fn run_citeproc(
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     cite_nodes: []*Node,
     references: []csl.Item,
     csl_file: []const u8,
@@ -203,8 +203,7 @@ pub fn run_citeproc(
         log.debug("{s} ", .{c});
     }
 
-    var runner = try std.ChildProcess.init(cmd, allocator);
-    defer runner.deinit();
+    var runner = std.ChildProcess.init(cmd, allocator);
     runner.stdin_behavior = .Pipe;
     runner.stdout_behavior = .Pipe;
     runner.stderr_behavior = .Pipe;
@@ -318,7 +317,7 @@ pub fn run_citeproc(
 }
 
 pub fn csl_items_from_file(
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     filename: []const u8,
     write_conversion: bool,
 ) !csl.CSLJsonParser.Result {
@@ -334,9 +333,9 @@ pub fn csl_items_from_file(
 
     const file = blk: {
         if (std.fs.path.isAbsolute(filename)) {
-            break :blk try std.fs.openFileAbsolute(filename, .{ .read = true, .write = false });
+            break :blk try std.fs.openFileAbsolute(filename, .{ .mode = .read_only });
         } else {
-            break :blk try std.fs.cwd().openFile(filename, .{ .read = true, .write = false });
+            break :blk try std.fs.cwd().openFile(filename, .{ .mode = .read_only });
         }
     };
     defer file.close();
@@ -352,7 +351,7 @@ pub fn csl_items_from_file(
             defer bib.deinit();
             var arena = std.heap.ArenaAllocator.init(allocator);
             // NOTE: we copy the strings from the Bibliography values so we can free it
-            const items = try bib_to_csl_json(&arena.allocator, bib, true);
+            const items = try bib_to_csl_json(arena.allocator(), bib, true);
             csl_json_result = .{ .arena = arena, .items = items };
 
             // write file

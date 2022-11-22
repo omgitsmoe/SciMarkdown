@@ -11,8 +11,8 @@ const DFS = @import("utils.zig").DepthFirstIterator;
 
 const expect = std.testing.expect;
 
-// meta.TagType gets union's enum tag type (by using @typeInfo(T).tag_type)
-pub const NodeKind = std.meta.TagType(Node.NodeData);
+// meta.Tag gets union's enum tag type (by using @typeInfo(T).tag_type)
+pub const NodeKind = std.meta.Tag(Node.NodeData);
 pub const Node = struct {
     parent: ?*Node,
 
@@ -119,29 +119,37 @@ pub const Node = struct {
         HardLineBreak,
         Text: struct { text: []const u8 },
 
-        pub fn print(self: *@This()) void {
+        pub fn format(
+            self: @This(),
+            comptime fmt: []const u8,
+            options: std.fmt.FormatOptions,
+            writer: anytype,
+        ) !void {
+            _ = fmt;
+            _ = options;
+
             const uT = @typeInfo(@This()).Union;
             inline for (uT.fields) |union_field, enum_i| {
                 // check for active tag
-                if (enum_i == @enumToInt(self.*)) {
-                    std.debug.print("{s}{{ ", .{@tagName(self.*)});
+                if (enum_i == @enumToInt(self)) {
+                    try writer.print("{s}{{ ", .{@tagName(self)});
                     // the union_field is only the active union variant like BuiltinCall or CodeSpan etc.
                     // iter over actual payload type fields (assuming it's a struct)
                     switch (@typeInfo(union_field.field_type)) {
                         .Struct => |fT| {
                             inline for (fT.fields) |ft_field| {
-                                std.debug.print(".{s} = ", .{ft_field.name});
+                                try writer.print(".{s} = ", .{ft_field.name});
                                 // print as str if type is []const u8
                                 // necessary due to zig's recent change to just print []u8 as actual u8
                                 // unless explicitly specified as {s}, which means every []u8 has
                                 // to specified manually with {s} which is a pain in nested structs etc.
                                 if (ft_field.field_type == []const u8) {
-                                    std.debug.print(
+                                    try writer.print(
                                         "'{s}', ",
                                         .{@field(@field(self, union_field.name), ft_field.name)},
                                     );
                                 } else {
-                                    std.debug.print(
+                                    try writer.print(
                                         "{any}, ",
                                         .{@field(@field(self, union_field.name), ft_field.name)},
                                     );
@@ -153,13 +161,13 @@ pub const Node = struct {
                     }
                 }
             }
-            std.debug.print("}}\n", .{});
+            try writer.writeAll("}}\n");
         }
     };
 
     // NOTE: IMPORTANT! only pass allocators that do not realloc/move the data (like ArrayList)
     // since we store raw pointers here
-    pub inline fn create(allocator: *std.mem.Allocator) !*Node {
+    pub inline fn create(allocator: std.mem.Allocator) !*Node {
         var new_node = try allocator.create(Node);
         new_node.* = .{
             .parent = null,
@@ -189,7 +197,7 @@ pub const Node = struct {
     /// allocator has to be the allocator that node and it's direct children were
     /// allocated with
     /// Node's child must not have children of their own, otherwise there will be a leak
-    pub fn delete_direct_children(self: *Node, allocator: *std.mem.Allocator) void {
+    pub fn delete_direct_children(self: *Node, allocator: std.mem.Allocator) void {
         var mb_next = self.first_child;
         while (mb_next) |next| {
             mb_next = next.next;
@@ -201,7 +209,7 @@ pub const Node = struct {
     }
 
     /// allocator has to be the one that node and it's direct children were allocated with
-    pub fn delete_children(self: *Node, allocator: *std.mem.Allocator) void {
+    pub fn delete_children(self: *Node, allocator: std.mem.Allocator) void {
         var dfs = DFS(Node, true).init(self);
 
         while (dfs.next()) |node_info| {
@@ -277,7 +285,7 @@ pub const Node = struct {
                     std.debug.print("  ", .{});
                 }
             }
-            current.data.print();
+            std.debug.print("{}", .{ current.data });
 
             const result = current.dfs_next_lvl();
             mb_current = result.next;

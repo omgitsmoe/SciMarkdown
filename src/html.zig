@@ -8,7 +8,7 @@ const Node = ast.Node;
 const NodeKind = ast.NodeKind;
 
 pub const HTMLGenerator = struct {
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     start_node: *Node,
     label_node_map: std.StringHashMap(*Node.NodeData),
 
@@ -19,7 +19,7 @@ pub const HTMLGenerator = struct {
 
     /// label_node_map is taken from the parser, but HTMLGenerator doesn't take ownership
     pub fn init(
-        allocator: *std.mem.Allocator,
+        allocator: std.mem.Allocator,
         start_node: *Node,
         label_node_map: std.StringHashMap(*Node.NodeData),
     ) HTMLGenerator {

@@ -8,7 +8,7 @@ pub const BibParser = struct {
     bib: Bibliography,
     idx: u32,
     bytes: []const u8,
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
 
     pub const Error = error{
         SyntaxError,
@@ -17,7 +17,7 @@ pub const BibParser = struct {
         DuplicateLabel,
     };
 
-    pub fn init(allocator: *std.mem.Allocator, path: []const u8, bytes: []const u8) BibParser {
+    pub fn init(allocator: std.mem.Allocator, path: []const u8, bytes: []const u8) BibParser {
         var parser = BibParser{
             .bib = Bibliography{
                 .path = path,
@@ -253,7 +253,7 @@ pub const BibParser = struct {
             return Error.DuplicateLabel;
         } else {
             // actually write entry value (key was already written by getOrPut)
-            entry_found.value_ptr.* = Entry.init(&self.bib.field_arena.allocator, entry_type);
+            entry_found.value_ptr.* = Entry.init(self.bib.field_arena.allocator(), entry_type);
         }
         try self.advance_to_next_byte();
 
@@ -306,7 +306,7 @@ pub const BibParser = struct {
 
         // need to reform field value string since it might contain braces and other
         // escapes
-        var field_value_str = std.ArrayList(u8).init(&self.bib.field_arena.allocator);
+        var field_value_str = std.ArrayList(u8).init(self.bib.field_arena.allocator());
 
         var braces: u32 = 0;
         // TODO foreign/special char escapes e.g. \'{o} for ó etc.
@@ -362,7 +362,7 @@ pub const BibParser = struct {
                 // NOTE: the split list still uses the memory of field_value_str
                 // so we can't free it
                 value.*.values = try BibParser.split_list(
-                    &self.bib.field_arena.allocator,
+                    self.bib.field_arena.allocator(),
                     field_value_str.toOwnedSlice(),
                 );
             },
@@ -390,12 +390,12 @@ pub const BibParser = struct {
         });
     }
 
-    inline fn split_list(allocator: *std.mem.Allocator, bytes: []const u8) Error![]const []const u8 {
+    inline fn split_list(allocator: std.mem.Allocator, bytes: []const u8) Error![]const []const u8 {
         // NOTE: not checking keys of key lists
         // NOTE: leaving names of name lists as-is and parsing them on demand
         // with ListField.parse_name
         var split_items = std.ArrayList([]const u8).init(allocator);
-        var split_iter = std.mem.split(bytes, " and ");
+        var split_iter = std.mem.split(u8, bytes, " and ");
         while (split_iter.next()) |item| {
             try split_items.append(item);
         }
@@ -509,7 +509,7 @@ pub const Bibliography = struct {
 };
 
 // could use std.meta.TagPayloadType to get payload type from tag on a tagged union
-pub const FieldTypeTT = std.meta.TagType(FieldType);
+pub const FieldTypeTT = std.meta.Tag(FieldType);
 pub const FieldType = union(enum) {
     // lists
     // all lists can be shortened with 'and others'
@@ -814,7 +814,7 @@ pub const Entry = struct {
 
     /// FieldMap should be initialized with Bibliography.field_arena.allocator
     /// so we don't have to deinit
-    pub fn init(allocator: *std.mem.Allocator, _type: EntryType) Entry {
+    pub fn init(allocator: std.mem.Allocator, _type: EntryType) Entry {
         return Entry{
             ._type = _type,
             .fields = FieldMap.init(allocator),

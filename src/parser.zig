@@ -23,7 +23,7 @@ const BuiltinCall = bic.BuiltinCall;
 const builtin_call_info = bic.builtin_call_info;
 
 pub const Parser = struct {
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     node_arena: std.heap.ArenaAllocator,
     string_arena: std.heap.ArenaAllocator,
 
@@ -77,7 +77,7 @@ pub const Parser = struct {
 
     const LangSet = std.enums.EnumSet(code_chunks.Language);
 
-    pub fn init(allocator: *std.mem.Allocator, filename: []const u8) !Parser {
+    pub fn init(allocator: std.mem.Allocator, filename: []const u8) !Parser {
         var parser = Parser{
             .allocator = allocator,
             .node_arena = std.heap.ArenaAllocator.init(allocator),
@@ -103,7 +103,8 @@ pub const Parser = struct {
         try parser.token_buf.append(try parser.tokenizer.get_token());
 
         // create() returns ptr to undefined memory
-        var current_document = try Node.create(&parser.node_arena.allocator);
+        // TODO: @Performance does re-creating the allocator from the arena impact performance?
+        var current_document = try Node.create(parser.node_arena.allocator());
         current_document.data = .Document;
         parser.current_document = current_document;
         parser.open_blocks[0] = current_document;
@@ -123,7 +124,7 @@ pub const Parser = struct {
 
     inline fn new_node(self: *Parser, parent: *Node) !*Node {
         std.debug.assert(ast.children_allowed(parent.data));
-        const node = try Node.create(&self.node_arena.allocator);
+        const node = try Node.create(self.node_arena.allocator());
         parent.append_child(node);
         // invalidate last text block; doing this manually was too error prone
         self.last_text_node = null;
@@ -1507,7 +1508,7 @@ pub const Parser = struct {
     fn parse_code_block(self: *Parser) ParseError!void {
         // ArrayList doesn't accept ArenaAllocator directly so we need to
         // pass string_arena.allocator which is the proper mem.Allocator
-        var string_buf = std.ArrayList(u8).init(&self.string_arena.allocator);
+        var string_buf = std.ArrayList(u8).init(self.string_arena.allocator());
         var current_indent_lvl: u16 = 0;
         // TODO switch this to using spaces instead of "levels"?
         const indent = " " ** tokenizer.SPACES_PER_INDENT;
@@ -1707,8 +1708,8 @@ pub const Parser = struct {
         // start + 1 since the @ is included
         const keyword = self.tokenizer.bytes[start_token.start + 1 .. start_token.end];
         const mb_builtin_type = std.meta.stringToEnum(BuiltinCall, keyword);
-        log.debug("Builtin type: {}", .{mb_builtin_type});
         if (mb_builtin_type) |bi_type| {
+            log.debug("Builtin type: {}", .{bi_type});
             builtin_node.data = .{ .BuiltinCall = .{ .builtin_type = bi_type } };
         } else {
             Parser.report_error("ln:{}: Unrecognized builtin: '{s}'\n", .{ start_token.line_nr, keyword });
@@ -1784,7 +1785,7 @@ pub const Parser = struct {
                             // TODO this is error prone @Improve
                             //      (additionally make new_node set this to null?)
                             self.last_text_node = null;
-                            current_arg.delete_direct_children(&self.node_arena.allocator);
+                            current_arg.delete_direct_children(self.node_arena.allocator());
                             self.eat_token();
                         },
                         .Comma => {
@@ -1996,7 +1997,7 @@ pub const Parser = struct {
         // to "annotate" them like this (https://github.com/ziglang/zig/issues/9296)
         _ = data;
 
-        const allocator = &self.node_arena.allocator;
+        const allocator = self.node_arena.allocator();
         const result = bic.evaluate_builtin(allocator, builtin_node, builtin_type, .{}) catch {
             return ParseError.BuiltinCallFailed;
         };

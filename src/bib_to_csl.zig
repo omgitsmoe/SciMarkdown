@@ -12,7 +12,7 @@ pub const Error = error{
 };
 
 /// should be called with an arena allocator
-pub fn bib_to_csl_json(allocator: *std.mem.Allocator, bib: bibtex.Bibliography, comptime copy_strings: bool) ![]csl.Item {
+pub fn bib_to_csl_json(allocator: std.mem.Allocator, bib: bibtex.Bibliography, comptime copy_strings: bool) ![]csl.Item {
     var items = std.ArrayList(csl.Item).init(allocator);
 
     var bib_iter = bib.label_entry_map.iterator();
@@ -105,7 +105,7 @@ fn bibtex_month_to_num(month: []const u8) !u8 {
     var buf = [_]u8{undefined} ** 50;
     var allocator = std.heap.FixedBufferAllocator.init(buf[0..]);
 
-    const lowercased = try std.ascii.allocLowerString(&allocator.allocator, month);
+    const lowercased = try std.ascii.allocLowerString(allocator.allocator(), month);
     var result: u8 = undefined;
     if (mem.startsWith(u8, lowercased, "jan")) {
         result = 1;
@@ -263,7 +263,7 @@ pub fn bib_entry_to_csl_item(entry_type: bibtex.EntryType) !csl.ItemType {
 }
 
 pub fn set_bib_field_on_csl(
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     field_name: bibtex.FieldName,
     field_data: bibtex.FieldType,
     item_props: *csl.PropertyMap,
@@ -805,8 +805,8 @@ pub fn set_bib_field_on_csl(
 }
 
 fn bib_field_extract_name_list(
-    allocator: *std.mem.Allocator,
-    comptime active_tag: std.meta.TagType(csl.Property),
+    allocator: std.mem.Allocator,
+    comptime active_tag: std.meta.Tag(csl.Property),
     field_data: bibtex.FieldType,
     comptime copy_strings: bool,
 ) !csl.Property {
@@ -838,8 +838,8 @@ fn bib_field_extract_name_list(
 }
 
 fn bib_field_extract_list(
-    allocator: *std.mem.Allocator,
-    comptime active_tag: std.meta.TagType(csl.Property),
+    allocator: std.mem.Allocator,
+    comptime active_tag: std.meta.Tag(csl.Property),
     comptime active_field_tag: bibtex.FieldTypeTT,
     field_data: bibtex.FieldType,
     comptime copy_strings: bool,
@@ -864,7 +864,7 @@ fn bib_field_extract_list(
 }
 
 inline fn maybe_copy_string(
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     comptime copy_strings: bool,
     string: []const u8,
 ) ![]const u8 {

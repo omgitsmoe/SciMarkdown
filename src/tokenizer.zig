@@ -175,7 +175,7 @@ pub const Token = struct {
 };
 
 pub const Tokenizer = struct {
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     // can't have const filename inside struct unless declaring new global type
     // after looking at zig stdlib that statement might not be true?
     filename: []const u8,
@@ -199,9 +199,9 @@ pub const Tokenizer = struct {
         SuddenEndOfFile,
     };
 
-    pub fn init(allocator: *std.mem.Allocator, filename: []const u8) !Tokenizer {
+    pub fn init(allocator: std.mem.Allocator, filename: []const u8) !Tokenizer {
         // TODO skip BOM if present
-        const file = try std.fs.cwd().openFile(filename, .{ .read = true });
+        const file = try std.fs.cwd().openFile(filename, .{ .mode = .read_only });
         defer file.close();
 
         // there's also file.readAll that requires a pre-allocated buffer

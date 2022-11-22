@@ -10,7 +10,7 @@ pub const Item = struct {
     id: OrdinaryVar,
     optionals: PropertyMap,
 
-    pub fn init(alloactor: *std.mem.Allocator, _type: ItemType, id: OrdinaryVar) Item {
+    pub fn init(alloactor: std.mem.Allocator, _type: ItemType, id: OrdinaryVar) Item {
         return Item{
             .@"type" = _type,
             .id = id,
@@ -379,7 +379,7 @@ pub fn write_items_json(items: []Item, out_stream: anytype) !void {
     try out_stream.writeByte(']');
 }
 
-pub fn read_items_json(allocator: *std.mem.Allocator, input: []const u8) !CSLJsonParser.Result {
+pub fn read_items_json(allocator: std.mem.Allocator, input: []const u8) !CSLJsonParser.Result {
     var parser = CSLJsonParser.init(allocator, input);
     return parser.parse();
 }
@@ -481,7 +481,7 @@ pub const CSLJsonParser = struct {
         items: []Item,
     };
 
-    pub fn init(allocator: *std.mem.Allocator, input: []const u8) CSLJsonParser {
+    pub fn init(allocator: std.mem.Allocator, input: []const u8) CSLJsonParser {
         var parser = CSLJsonParser{
             .stream = std.json.TokenStream.init(input),
             .arena = std.heap.ArenaAllocator.init(allocator),
@@ -496,7 +496,7 @@ pub const CSLJsonParser = struct {
     pub fn parse(self: *@This()) !Result {
         // NOTE: can't be initialized in init since the address of the arena.allocator
         // will change
-        self.items = std.ArrayList(Item).init(&self.arena.allocator);
+        self.items = std.ArrayList(Item).init(self.arena.allocator());
 
         while (try self.stream.next()) |token| {
             try self.feed(token);
@@ -527,7 +527,7 @@ pub const CSLJsonParser = struct {
                         self.state = .item_begin;
                         const item: *Item = try self.items.addOne();
                         // init PropertyMap
-                        item.optionals = PropertyMap.init(&self.arena.allocator);
+                        item.optionals = PropertyMap.init(self.arena.allocator());
                         self.current = @intCast(u32, self.items.items.len) - 1;
                     },
                     .ArrayEnd => self.state = .end,
@@ -603,7 +603,7 @@ pub const CSLJsonParser = struct {
         slice: []const u8,
     ) ![]const u8 {
         if (str.escapes == .Some) {
-            var strbuf = try std.ArrayList(u8).initCapacity(&self.arena.allocator, str.decodedLength());
+            var strbuf = try std.ArrayList(u8).initCapacity(self.arena.allocator(), str.decodedLength());
 
             var escaped = false;
             for (slice) |b| {
@@ -618,7 +618,7 @@ pub const CSLJsonParser = struct {
 
             return strbuf.toOwnedSlice();
         } else {
-            return mem.dupe(&self.arena.allocator, u8, slice);
+            return self.arena.allocator().dupe(u8, slice);
         }
     }
 
@@ -643,7 +643,7 @@ pub const CSLJsonParser = struct {
         // const PayloadType = std.meta.TagPayload(Property, prop_kind);
         // const payload = std.json.parse(
         //     PayloadType, &self.stream,
-        //     .{ .allocator = &self.arena.allocator,
+        //     .{ .allocator = self.arena.allocator(),
         //        .allow_trailing_data = true }
         // ) catch |err| {
         //     log.err("Could not parse property for field: {s} due to err {s}\n",
@@ -715,9 +715,9 @@ pub const CSLJsonParser = struct {
                 const payload = std.json.parse(
                     []const u8,
                     &self.stream,
-                    .{ .allocator = &self.arena.allocator, .allow_trailing_data = true },
+                    .{ .allocator = self.arena.allocator(), .allow_trailing_data = true },
                 ) catch |err| {
-                    log.err("Could not parse property for field: {s} due to err {s}\n", .{ prop_name, err });
+                    log.err("Could not parse property for field: {s} due to err {}\n", .{ prop_name, err });
                     return Error.UnknownProperty;
                 };
                 prop = utils.unionInitTagged(Property, prop_kind, []const u8, payload);
@@ -728,9 +728,9 @@ pub const CSLJsonParser = struct {
                 const payload = std.json.parse(
                     []const []const u8,
                     &self.stream,
-                    .{ .allocator = &self.arena.allocator, .allow_trailing_data = true },
+                    .{ .allocator = self.arena.allocator(), .allow_trailing_data = true },
                 ) catch |err| {
-                    log.err("Could not parse property for field: {s} due to err {s}\n", .{ prop_name, err });
+                    log.err("Could not parse property for field: {s} due to err {}\n", .{ prop_name, err });
                     return Error.UnknownProperty;
                 };
                 prop = utils.unionInitTagged(Property, prop_kind, []const []const u8, payload);
@@ -767,9 +767,9 @@ pub const CSLJsonParser = struct {
                 const payload = std.json.parse(
                     []NameVar,
                     &self.stream,
-                    .{ .allocator = &self.arena.allocator, .allow_trailing_data = true },
+                    .{ .allocator = self.arena.allocator(), .allow_trailing_data = true },
                 ) catch |err| {
-                    log.err("Could not parse property for field: {s} due to err {s}\n", .{ prop_name, err });
+                    log.err("Could not parse property for field: {s} due to err {}\n", .{ prop_name, err });
                     return Error.UnknownProperty;
                 };
                 prop = utils.unionInitTagged(Property, prop_kind, []NameVar, payload);
@@ -780,9 +780,9 @@ pub const CSLJsonParser = struct {
                 const payload = std.json.parse(
                     DateVar,
                     &self.stream,
-                    .{ .allocator = &self.arena.allocator, .allow_trailing_data = true },
+                    .{ .allocator = self.arena.allocator(), .allow_trailing_data = true },
                 ) catch |err| {
-                    log.err("Could not parse property for field: {s} due to err {s}\n", .{ prop_name, err });
+                    log.err("Could not parse property for field: {s} due to err {}\n", .{ prop_name, err });
                     return Error.UnknownProperty;
                 };
                 prop = utils.unionInitTagged(Property, prop_kind, DateVar, payload);
@@ -809,9 +809,9 @@ pub const CSLJsonParser = struct {
                 const payload = std.json.parse(
                     OrdinaryVar,
                     &self.stream,
-                    .{ .allocator = &self.arena.allocator, .allow_trailing_data = true },
+                    .{ .allocator = self.arena.allocator(), .allow_trailing_data = true },
                 ) catch |err| {
-                    log.err("Could not parse property for field: {s} due to err {s}\n", .{ prop_name, err });
+                    log.err("Could not parse property for field: {s} due to err {}\n", .{ prop_name, err });
                     return Error.UnknownProperty;
                 };
                 prop = utils.unionInitTagged(Property, prop_kind, OrdinaryVar, payload);
@@ -825,6 +825,6 @@ pub const CSLJsonParser = struct {
         // NOTE: the hashmap implementation only stores the slice, but not the underlying
         // u8 buffer, so we have to dupe it here, otherwise the memory will be invalid
         // when the csl_json input slice gets free'd
-        try props.put(try self.arena.allocator.dupe(u8, prop_name), prop);
+        try props.put(try self.arena.allocator().dupe(u8, prop_name), prop);
     }
 };

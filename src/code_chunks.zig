@@ -54,12 +54,12 @@ pub const CodeRunner = struct {
     code_datas: std.ArrayList(*ast.Node.CodeData),
     lang: Language,
     merged_code: std.ArrayList(u8),
-    runner: *std.ChildProcess,
+    runner: std.ChildProcess,
     out_buf: std.heap.ArenaAllocator,
 
     // TODO @CleanUp is a type even needed for this? we could just use a function that returns
     // a struct with a deinit method?
-    pub fn init(allocator: *std.mem.Allocator, language: Language, root_node: *ast.Node) !CodeRunner {
+    pub fn init(allocator: std.mem.Allocator, language: Language, root_node: *ast.Node) !CodeRunner {
         var code_runner = CodeRunner{
             .root_node = root_node,
             .code_datas = std.ArrayList(*ast.Node.CodeData).init(allocator),
@@ -172,13 +172,13 @@ pub const CodeRunner = struct {
     }
 
     pub fn run(self: *CodeRunner) !void {
-        const allocator = &self.out_buf.allocator;
+        const allocator = self.out_buf.allocator();
         const cmd = switch (self.lang) {
             .Python => &[_][]const u8{"python"},
             .R => &[_][]const u8{ "R", "--save", "--quiet", "--no-echo" },
             else => return,
         };
-        self.runner = try std.ChildProcess.init(cmd, allocator);
+        self.runner = std.ChildProcess.init(cmd, allocator);
         self.runner.stdin_behavior = .Pipe;
         self.runner.stdout_behavior = .Pipe;
         self.runner.stderr_behavior = .Pipe;

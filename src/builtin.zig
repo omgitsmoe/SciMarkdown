@@ -64,7 +64,7 @@ pub const Error = error{
 /// evaluate_builtin and derivatives are expected to clean up the argument nodes
 /// so that only the builtin_node itself OR the result nodes remain!
 pub fn evaluate_builtin(
-    allocator: *std.mem.Allocator,
+    allocator: std.mem.Allocator,
     builtin_node: *ast.Node,
     builtin_type: BuiltinCall,
     data: anytype,
@@ -132,7 +132,8 @@ pub fn evaluate_builtin(
 
             log.debug("Multicite:\n", .{});
             for (citations.items) |it| {
-                log.debug("    {s}\n", .{it});
+                // TODO: format method for CitationItem
+                log.debug("    {any}\n", .{it});
             }
             log.debug("Multicite END\n", .{});
 
