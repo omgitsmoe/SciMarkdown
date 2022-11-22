@@ -382,11 +382,13 @@ pub const Parser = struct {
                     blockquote_node.data = .BlockQuote;
                     self.open_block(blockquote_node);
                 } else if (self.peek_token().token_kind == TokenKind.Newline) {
+                    // """ then new line closes blockquote
                     self.eat_token();
-                    // """ then blank line closes blockquote
                     try self.require_token(
                         TokenKind.Decrease_indent,
-                        " after '\"\"\"\\n' when closing a blockquote!",
+                        " after '\"\"\"\\n' when closing a blockquote! " ++
+                            "Make sure the blank line following the blockquote does not " ++
+                            "contain any whitespace!",
                     );
                     self.eat_token(); // eat -Indent
                     // end blockquote

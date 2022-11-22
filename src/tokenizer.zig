@@ -195,7 +195,6 @@ pub const Tokenizer = struct {
 
     pub const Error = error{
         UnmachtingDedent,
-        BlankLineContainsWhiteSpace,
         SuddenEndOfFile,
     };
 
@@ -336,20 +335,11 @@ pub const Tokenizer = struct {
                     }
 
                     // only change indent_status if it's not a blank line
-                    // NOTE: got rid of this since a blank line between blockquotes would
-                    // swallow the +Indent -Indent
-                    // make blank lines containing whitespace an error instead
-                    // (similar to e.g. PEP8 W293 in python, but more extreme)
-                    // TODO is this too obnoxious?
-                    if (self.peek_next_byte()) |next_byte| { // need this due to compiler bug involving optionals
+                    if (self.peek_next_byte()) |next_byte| {
                         if (indent_spaces > 0 and
                             (next_byte == @as(u8, '\n') or next_byte == @as(u8, '\r')))
                         {
-                            Tokenizer.report_error(
-                                "ln:{}: Blank line contains whitespace!\n",
-                                .{self.line_count},
-                            ); // not tok.line_nr since its the next line
-                            return Error.BlankLineContainsWhiteSpace;
+                            break :blk TokenKind.Newline;
                         }
                     }
 
