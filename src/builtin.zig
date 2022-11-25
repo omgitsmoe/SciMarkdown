@@ -56,6 +56,7 @@ pub const Error = error{
     ArgumentMismatch,
     InvalidArgument,
     BuiltinNotAllowed,
+    UnexpectedNode,
 };
 
 // anytype means we can pass anonymous structs like: .{ .parser = self, .. }
@@ -63,6 +64,7 @@ pub const Error = error{
 /// expects that the correct amount of positional arguments are already validated by parse_builtin
 /// evaluate_builtin and derivatives are expected to clean up the argument nodes
 /// so that only the builtin_node itself OR the result nodes remain!
+/// should be called with an ArenaAllocator
 pub fn evaluate_builtin(
     allocator: std.mem.Allocator,
     builtin_node: *ast.Node,
@@ -78,14 +80,14 @@ pub fn evaluate_builtin(
     switch (builtin_type) {
         .cite => {
             result = .{
-                .cite = try evaluate_builtin_cite(builtin_node, .cite, data),
+                .cite = try evaluate_builtin_cite(builtin_node, .cite, allocator, data),
             };
             // clean up arguments
             builtin_node.delete_children(allocator);
         },
         .textcite => {
             result = .{
-                .textcite = try evaluate_builtin_textcite(builtin_node, .textcite, .{}),
+                .textcite = try evaluate_builtin_textcite(builtin_node, .textcite, allocator, .{}),
             };
             // clean up arguments
             builtin_node.delete_children(allocator);
@@ -196,15 +198,16 @@ pub fn evaluate_builtin(
 
 /// just here since recursive calls won't compile with the compiler being stuck in an
 /// infinite loop during semantic analysis see: https://github.com/ziglang/zig/issues/4572
-pub fn evaluate_builtin_textcite(
+fn evaluate_builtin_textcite(
     builtin_node: *ast.Node,
     builtin_type: BuiltinCall,
+    allocator: std.mem.Allocator,
     data: anytype,
 ) Error![2]csl.CitationItem {
     _ = builtin_type;
     // TODO fix kwargs on textcite since we use two separate cites to emulate a real textcite
     // the pre/post/etc get printed twice
-    var cite_author_only = try evaluate_builtin_cite(builtin_node, .textcite, data);
+    var cite_author_only = try evaluate_builtin_cite(builtin_node, .textcite, allocator, data);
     var cite_no_author: csl.CitationItem = cite_author_only;
 
     cite_author_only.@"author-only" = .{ .boolean = true };
@@ -213,9 +216,10 @@ pub fn evaluate_builtin_textcite(
     return [2]csl.CitationItem{ cite_author_only, cite_no_author };
 }
 
-pub fn evaluate_builtin_cite(
+fn evaluate_builtin_cite(
     builtin_node: *ast.Node,
     builtin_type: BuiltinCall,
+    allocator: std.mem.Allocator,
     data: anytype,
 ) Error!csl.CitationItem {
     _ = data;
@@ -280,15 +284,16 @@ pub fn evaluate_builtin_cite(
             }
 
             if (std.mem.eql(u8, next.data.KeywordArg.keyword, "pre")) {
-                citation.prefix = next.first_child.?.data.Text.text;
+                citation.prefix = try next.inline_as_text(allocator);
             } else if (std.mem.eql(u8, next.data.KeywordArg.keyword, "post")) {
-                citation.suffix = next.first_child.?.data.Text.text;
+                citation.suffix = try next.inline_as_text(allocator);
             } else if (std.mem.eql(u8, next.data.KeywordArg.keyword, "loc")) {
-                citation.locator = next.first_child.?.data.Text.text;
+                citation.locator = try next.inline_as_text(allocator);
             } else if (std.mem.eql(u8, next.data.KeywordArg.keyword, "label")) {
+                const label = try next.inline_as_text(allocator);
                 const mb_loc_type = std.meta.stringToEnum(
                     csl.CitationItem.LocatorType,
-                    next.first_child.?.data.Text.text,
+                    label,
                 );
                 if (mb_loc_type) |loc_type| {
                     citation.label = loc_type;
@@ -297,7 +302,7 @@ pub fn evaluate_builtin_cite(
                         "'label={s}' is not a valid locator type! See " ++
                             "https://docs.citationstyles.org/en/stable/" ++
                             "specification.html#locators for valid locator types!\n",
-                        .{next.first_child.?.data.Text.text},
+                        .{label},
                     );
                     return Error.InvalidArgument;
                 }

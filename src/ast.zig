@@ -25,6 +25,7 @@ pub const Node = struct {
     // separate kind field
     data: NodeData,
 
+    // label is for reference-style links
     pub const LinkData = struct { label: ?[]const u8, url: ?[]const u8, title: ?[]const u8 };
     pub const EmphData = struct { opener_token_kind: TokenKind };
     pub const ListData = struct { blank_lines: u32, start_num: u16 = 1, ol_type: u8 };
@@ -150,6 +151,12 @@ pub const Node = struct {
                                         "'{s}', ",
                                         .{@field(@field(self, union_field.name), ft_field.name)},
                                     );
+                                } else if (ft_field.field_type == ?[]const u8) {
+                                    if (@field(@field(self, union_field.name), ft_field.name)) |str| {
+                                        try writer.print("'{s}', ", .{str});
+                                    } else {
+                                        try writer.print("null, ", .{});
+                                    }
                                 } else {
                                     try writer.print(
                                         "{any}, ",
@@ -167,8 +174,12 @@ pub const Node = struct {
         }
     };
 
-    // NOTE: IMPORTANT! only pass allocators that do not realloc/move the data (like ArrayList)
-    // since we store raw pointers here
+    pub const Error = error{
+        UnexpectedNode,
+    };
+
+    // NOTE: IMPORTANT! only pass allocators that do not realloc/move the data
+    // (e.g. don't use ArrayList) since we store raw pointers here
     pub inline fn create(allocator: std.mem.Allocator) !*Node {
         var new_node = try allocator.create(Node);
         new_node.* = .{
@@ -293,6 +304,125 @@ pub const Node = struct {
             mb_current = result.next;
             level += result.lvl_delta;
         }
+    }
+
+    /// Collect all the text nodes (Text and EscapedChar) of the direct children into a slice
+    /// Will allocate if there is a EscapedChar
+    pub fn collect_text(self: @This(), allocator: std.mem.Allocator) ![]const u8 {
+        var result: []const u8 = &.{};
+        var builder: std.ArrayList(u8) = undefined;
+        var hit_escaped = false;
+        // we only need to allcoate once we hit .EscapedChar since all the previous text
+        // should be inside the same
+        var mb_next = self.next;
+        while (mb_next) |cur| : (mb_next = cur.next) {
+            switch (cur.data) {
+                .EscapedChar => |data| {
+                    if (hit_escaped) {
+                        try builder.append(data.char);
+                    } else {
+                        builder = std.ArrayList(u8).init(allocator);
+                    }
+                },
+                .Text => |data| {
+                    if (hit_escaped) {
+                        try builder.appendSlice(data.text);
+                    } else if (result.len > 0) {
+                        result.len += data.text.len;
+                    } else {
+                        result = data.text;
+                    }
+                },
+                else => {
+                    log.err(
+                        "Reached non-text node ({s}) when collecting text!",
+                        .{@tagName(cur.data)},
+                    );
+                    return Error.UnexpectedNode;
+                },
+            }
+        }
+
+        if (hit_escaped) result = builder.toOwnedSlice();
+        return result;
+    }
+
+    /// Textual representation of inline nodes
+    pub fn inline_as_text(self: *@This(), allocator: std.mem.Allocator) ![]const u8 {
+        var builder = std.ArrayList(u8).init(allocator);
+        var dfs = DFS(Node, true).init(self);
+        while (dfs.next()) |node| {
+            if (node.data == self) continue;
+            switch (node.data.data) {
+                .CodeSpan => |data| {
+                    if (node.is_end) continue;
+                    if (data.run) try builder.append('>');
+                    try builder.append('`');
+                    try builder.appendSlice(data.code);
+                    try builder.append('`');
+                },
+                .MathInline => |data| {
+                    if (node.is_end) continue;
+                    try builder.append('$');
+                    try builder.appendSlice(data.text);
+                    try builder.append('$');
+                },
+                .Emphasis => |data| {
+                    try builder.appendSlice(data.opener_token_kind.name());
+                },
+                .StrongEmphasis => |data| {
+                    try builder.appendSlice(data.opener_token_kind.name());
+                },
+                .Strikethrough => try builder.appendSlice("~~"),
+                .Superscript => try builder.append('^'),
+                .Subscript => try builder.append('^'),
+                .SmallCaps => {
+                    if (node.is_end) {
+                        try builder.append(')');
+                    } else {
+                        try builder.appendSlice("@sc(");
+                    }
+                },
+                .Link => |data| {
+                    if (node.is_end) {
+                        try builder.append(']');
+                        if (data.label) |label| {
+                            try builder.append('[');
+                            try builder.appendSlice(label);
+                            try builder.append(']');
+                        } else {
+                            try builder.append('(');
+                            // url has to be set if it's not a ref-style link
+                            try builder.appendSlice(data.url.?);
+                            if (data.title) |title| {
+                                try builder.appendSlice(" \"");
+                                try builder.appendSlice(title);
+                                try builder.append('"');
+                            }
+                            try builder.append(')');
+                        }
+                    } else {
+                        try builder.append('[');
+                    }
+                },
+                .EscapedChar => |data| {
+                    try builder.append('\\');
+                    try builder.append(data.char);
+                },
+                .Text => |data| {
+                    try builder.appendSlice(data.text);
+                },
+                else => {
+                    log.err(
+                        "Reached non-inline node ({s}) when collecting text!",
+                        .{@tagName(node.data.data)},
+                    );
+                    return Error.UnexpectedNode;
+                },
+            }
+        }
+
+        return builder.toOwnedSlice();
     }
 
     /// contrary to utils.DepthFirstIterator this iterator does not visit

@@ -305,13 +305,22 @@ pub fn run_citeproc(
     defer allocator.free(stdout);
 
     log.debug("Done reading from citeproc stdout!\n", .{});
-    // log.debug("OUT:\n{s}\n", .{ stdout });
+    log.debug("OUT:\n{s}\n", .{stdout});
     const stderr = try runner.stderr.?.reader().readAllAlloc(allocator, 10 * 1024 * 1024);
     defer allocator.free(stderr);
     log.debug("Done reading from citeproc stderr!\nERR:\n{s}\n", .{stderr});
 
     _ = try runner.wait();
 
+    // TODO we either:
+    // 1. don't allow inline nodes inside cite params
+    // 2. re-parse citations, once we get them back from citeproc
+    //   -> since we can't rely on citeproc/csl styles not using our inline node symbols
+    //      we have to mark the parts we need to re-parse in a hacky way
+    //      e.g. wrapping in sth. rare like \scm:prefix...\scm
+    // 3. handle csl/citations ourselves
+    // since 1. and 3. are out of the question due to too limited features and scope creep/effort
+    // we need to use the hacky solution in 2.
     var res = try nodes_from_citeproc_json(allocator, stdout, cite_nodes);
     return res;
 }
