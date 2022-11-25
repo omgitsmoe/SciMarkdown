@@ -251,7 +251,9 @@ pub fn evaluate_builtin_cite(
 
         var mb_next = fchild.next;
         while (mb_next) |next| : (mb_next = next.next) {
-            if (next.first_child == null or next.first_child.?.data != .Text) {
+            if (next.first_child == null or !(next.first_child.?.data == .Text or
+                next.first_child.?.data == .EscapedChar))
+            {
                 log.err(
                     "Only textual arguments allowed for builtin call '{s}'!\n",
                     .{@tagName(builtin_type)},

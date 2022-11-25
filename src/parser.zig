@@ -1402,6 +1402,17 @@ pub const Parser = struct {
                     .{ inline_math_start.line_nr, math_node.data.MathInline.text },
                 );
             },
+            TokenKind.Escaped_char => {
+                // TODO: or do this as text instead? (last_text_node = null; self.parse_text())
+                // TODO: handle this in (cite) builtin params
+                var escaped_node = try self.new_node(self.get_last_block());
+                escaped_node.data = .{
+                    .EscapedChar = .{ .char = self.tokenizer.bytes[token.start] },
+                };
+                // reset last text node so the backslash or escaped char don't get included
+                self.last_text_node = null;
+                self.eat_token();
+            },
             TokenKind.Open_bracket => {
                 try self.parse_link();
             },
@@ -1418,9 +1429,6 @@ pub const Parser = struct {
     inline fn parse_text(self: *Parser, token: *const Token, parent: *Node) ParseError!void {
         if (self.last_text_node) |continue_text| {
             // enlarge slice by directly manipulating the length (which is allowed in zig)
-            // TODO backslash escaped text will result in faulty text, since the
-            // backslash is included but the escaped text isn't and this as a whole ends
-            // up making the text buffer too narrow
             continue_text.data.Text.text.len += token.end - token.start;
         } else {
             var text_node = try self.new_node(parent);
@@ -1730,7 +1738,9 @@ pub const Parser = struct {
             next_kw,
             in_kw,
             after_kw,
+            // expect a kw parameter value next
             next_kw_param,
+            // inside a kw parameter value
             in_kw_param,
         };
 
@@ -1864,6 +1874,13 @@ pub const Parser = struct {
                                 self.tokenizer.bytes[last_end..tok.start];
                             last_end = tok.end;
                             self.eat_token();
+                        },
+                        .Escaped_char => {
+                            Parser.report_error(
+                                "ln:{}: No escapes allowed in keyword name!\n",
+                                .{tok.line_nr},
+                            );
+                            return ParseError.SyntaxError;
                         },
                         .Builtin_call => return ParseError.SyntaxError,
                         else => {

@@ -54,6 +54,7 @@ pub const TokenKind = enum {
     Run_codespan_alt,
 
     Backslash,
+    Escaped_char,
 
     Space,
     Tab,
@@ -127,6 +128,7 @@ pub const TokenKind = enum {
             .Hard_line_break => "(hard_line_break)",
             .Comment => "(comment)",
             .Digits => "(digits)",
+            .Escaped_char => "(escaped_char)",
             .Text => "(text)",
 
             .Builtin_call => "(@keyword)",
@@ -196,6 +198,7 @@ pub const Tokenizer = struct {
     pub const Error = error{
         UnmachtingDedent,
         SuddenEndOfFile,
+        IllegalUnicodeEscape,
     };
 
     pub fn init(allocator: std.mem.Allocator, filename: []const u8) !Tokenizer {
@@ -528,12 +531,20 @@ pub const Tokenizer = struct {
                     if (self.peek_next_byte()) |next_byte| {
                         if (next_byte == @as(u8, '\n') or next_byte == @as(u8, '\r')) {
                             break :blk TokenKind.Hard_line_break;
+                        } else if (next_byte >= @as(u8, 128)) {
+                            // multi-byte unicode
+                            Tokenizer.report_error(
+                                "ln:{}: Escaping multi-byte codepoints not supported\n",
+                                .{self.line_count},
+                            );
+                            return Error.IllegalUnicodeEscape;
                         }
                     }
 
                     self.advance_to_next_byte();
                     tok.start = self.index;
-                    break :blk TokenKind.Text;
+
+                    break :blk TokenKind.Escaped_char;
                 },
 
                 '@' => blk: {

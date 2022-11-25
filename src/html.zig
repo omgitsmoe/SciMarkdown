@@ -337,6 +337,9 @@ pub const HTMLGenerator = struct {
                 },
                 .HardLineBreak => try out_stream.writeAll("<br/>\n"),
                 .SoftLineBreak => try out_stream.writeByte('\n'),
+                .EscapedChar => |data| {
+                    try out_stream.writeByte(data.char);
+                },
                 .Text => |text| {
                     if (node_info.data.first_child) |fc| {
                         log.debug("Text node has child: {}\n", .{fc.data});

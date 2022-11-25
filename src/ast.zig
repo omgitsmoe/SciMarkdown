@@ -52,6 +52,7 @@ pub const Node = struct {
     pub const CitationData = struct { id: []const u8 };
 
     // tagged union
+    // TODO: follow new naming convention of snake case for enum tags
     pub const NodeData = union(enum) {
         // special
         Undefined,
@@ -118,6 +119,7 @@ pub const Node = struct {
         SoftLineBreak,
         HardLineBreak,
         Text: struct { text: []const u8 },
+        EscapedChar: struct { char: u8 },
 
         pub fn format(
             self: @This(),
@@ -285,7 +287,7 @@ pub const Node = struct {
                     std.debug.print("  ", .{});
                 }
             }
-            std.debug.print("{}", .{ current.data });
+            std.debug.print("{}", .{current.data});
 
             const result = current.dfs_next_lvl();
             mb_current = result.next;
